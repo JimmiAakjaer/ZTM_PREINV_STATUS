@@ -1,10 +1,10 @@
 { 
     "base": "./dist", 
     "conn_usestrictssl" : false, 
-    "conn_server": "https://dlgapps4dev1.dlggroup.org:44300/",
+    "conn_server": "https://xxx:44300/",
     "conn_client": "100", 
-    "conn_user": "feliprio",        
-    "conn_password": "Dlggroup@012024",   
+    "conn_user": "xxx",        
+    "conn_password": "xxx",   
     "abap_package": "Z001",       
     "abap_bsp": "ZTM_PREINV_STAT",  
     "abap_bsp_text": "TM: Selfbilling Pre-invoice",
