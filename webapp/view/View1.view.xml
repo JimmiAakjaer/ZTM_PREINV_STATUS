@@ -1,0 +1,185 @@
+<mvc:View
+    controllerName="ZTM_PREINV_STATUS.controller.View1"
+    xmlns="sap.m"
+    xmlns:calendar="sap.ui.unified.calendar"
+    xmlns:core="sap.ui.core"
+    xmlns:mvc="sap.ui.core.mvc"
+    xmlns:smartFilterBar="sap.ui.comp.smartfilterbar"
+    xmlns:smartTable="sap.ui.comp.smarttable"
+    xmlns:table="sap.ui.table"
+    xmlns:u="sap.ui.unified"
+    xmlns:html="http://www.w3.org/1999/xhtml"
+    xmlns:app="http://schemas.sap.com/sapui5/extension/sap.ui.core.CustomData/1"
+    height="100%"
+>
+    <VBox fitContainer="true">
+        <smartFilterBar:SmartFilterBar
+            id="smartFilterBar"
+            persistencyKey="UniqueAndStablePersistencyKey"
+            filterBarExpanded="true"
+            entitySet="ItemSet"
+            showClearButton="true"
+            showClearOnFB="true"
+            showRestoreOnFB="false"
+            considerSelectionVariants="true"
+            visible="true"
+        >
+            <!-- Fixed Filters -->
+            <smartFilterBar:controlConfiguration>
+                <smartFilterBar:ControlConfiguration
+                    id="_IDGenControlConfiguration1"
+                    index="1"
+                    key="IvSfirType"
+                    visibleInAdvancedArea="true"
+                />
+                <smartFilterBar:ControlConfiguration
+                    id="_IDGenControlConfiguration2"
+                    index="2"
+                    key="IvSfirId"
+                    visibleInAdvancedArea="true"
+                />
+                <smartFilterBar:ControlConfiguration
+                    id="_IDGenControlConfiguration3"
+                    index="3"
+                    key="IvCreatedOnFrom"
+                    visibleInAdvancedArea="true"
+                />
+                <smartFilterBar:ControlConfiguration
+                    id="_IDGenControlConfiguration4"
+                    index="4"
+                    key="IvCreatedOnTo"
+                    visibleInAdvancedArea="true"
+                />
+                <smartFilterBar:ControlConfiguration
+                    id="_IDGenControlConfiguration5"
+                    index="5"
+                    key="IvLifecycle"
+                    visibleInAdvancedArea="true"
+                />
+                <smartFilterBar:ControlConfiguration
+                    id="_IDGenControlConfiguration6"
+                    index="6"
+                    key="IvTorId"
+                    visibleInAdvancedArea="true"
+                />
+                <smartFilterBar:ControlConfiguration
+                    id="_IDGenControlConfiguration7"
+                    index="7"
+                    key="IvTspId"
+                    visibleInAdvancedArea="true"
+                />
+                <smartFilterBar:ControlConfiguration
+                    id="_IDGenControlConfiguration8"
+                    index="8"
+                    key="IvPreinvoice"
+                    visibleInAdvancedArea="true"
+                />
+                <smartFilterBar:ControlConfiguration
+                    id="_IDGenControlConfiguration9"
+                    index="9"
+                    key="IvInvDt"
+                    visibleInAdvancedArea="true"
+                />
+                <smartFilterBar:ControlConfiguration
+                    id="_IDGenControlConfiguration11"
+                    index="10"
+                    key="IvCreatedBy"
+                    visibleInAdvancedArea="true"
+                />
+                <smartFilterBar:ControlConfiguration
+                    id="_IDGenControlConfiguration12"
+                    index="11"
+                    key="IvExportStatus"
+                    visibleInAdvancedArea="true"
+                />
+                <smartFilterBar:ControlConfiguration
+                    id="_IDGenControlConfiguration13"
+                    index="12"
+                    key="IvPrintStatus"
+                    visibleInAdvancedArea="true"
+                />
+            </smartFilterBar:controlConfiguration>
+            <smartFilterBar:layoutData>
+                <FlexItemData shrinkFactor="0" />
+            </smartFilterBar:layoutData>
+        </smartFilterBar:SmartFilterBar>
+
+        <!-- SmartTable with Initial Fields -->
+        <smartTable:SmartTable
+            id="table001"
+            smartFilterId="smartFilterBar"
+            tableType="Table"
+            entitySet="ItemSet"
+            useExportToExcel="true"
+            beforeExport="onBeforeExport"
+            useVariantManagement="true"
+            useTablePersonalisation="true"
+            header="FSD Documents"
+            showRowCount="true"
+            persistencyKey="SmartTableAnalytical_Explored"
+            enableAutoBinding="true"
+            class="sapUiResponsiveContentPadding"
+            enableAutoColumnWidth="true"
+            app:useSmartToggle="true"
+            requestAtLeastFields="SfirId"
+            initiallyVisibleFields="SfirType,SfirId,Preinvoice,FsdDate,CreatedOn,Lifecycle,TspId,BpExt,InvDt,EvMessage,NetAmount,DocCurrency,AdminFee,PlanDisc,ExportStatus,PrintStatus,WebarchStatus">
+           
+            <!-- Extra Buttons -->
+            <smartTable:customToolbar>
+                <OverflowToolbar design="Transparent">
+                    <ToolbarSpacer />
+                    <Button
+                        type="Transparent"
+                        icon="sap-icon://curriculum"
+                        iconFirst="true"
+                        tooltip="Archive Specification"
+                        text="Archive Specification"
+                        press="onArchive"
+                    />
+                    <Button
+                        type="Transparent"
+                        icon="sap-icon://excel-attachment"
+                        iconFirst="true"
+                        tooltip="Upload your PreInvoice File to the FSD"
+                        text="Pre-Invoice Upload"
+                        press="openExcelUploadDialog"
+                    />
+                    <Button
+                        type="Transparent"
+                        icon="sap-icon://print"
+                        iconFirst="true"
+                        tooltip="Print Specification"
+                        text="Print Specification"
+                        press="onPrint"
+                    />
+                    <Button
+                        type="Transparent"
+                        icon="sap-icon://refresh"
+                        iconFirst="true"
+                        tooltip="Refresh"
+                        press="onRefresh"
+                    />
+                    <Button
+                        id="editButton"
+                        type="Transparent"
+                        icon="sap-icon://edit"
+                        press="onEdit"
+                    />
+                    <Button
+                        type="Transparent"
+                        icon="sap-icon://save"
+                        iconFirst="true"
+                        tooltip="Save Changes"
+                        text="Save Changes"
+                        press="onSave"
+                    />
+                </OverflowToolbar>
+            </smartTable:customToolbar>
+
+            <!-- layout data used to make the table growing but the filter bar fixed -->
+            <smartTable:layoutData>
+                <FlexItemData growFactor="1" />
+            </smartTable:layoutData>
+        </smartTable:SmartTable>
+    </VBox>
+</mvc:View>
