@@ -72,6 +72,7 @@ sap.ui.define(
         oSmartTable.rebindTable();
         oModel.refresh();
       },
+      /*
       onPrint: function(oEvent) {
         var that = this,
           oModel = this.getView().getModel(),
@@ -172,6 +173,121 @@ sap.ui.define(
             MessageBox.error(error); // Show error message if TspId validation fails
           });
       },
+      */
+      onPrint: function(oEvent) {
+        var that = this,
+          oModel = this.getView().getModel(),
+          oTable = this.byId("table001").getTable(),
+          aSelectedIndices = oTable.getSelectedIndices(),
+          aAllItems = [];
+
+        // Check if there are any selected indices
+        if (aSelectedIndices.length === 0) {
+          MessageBox.error("Select at least one line");
+          return;
+        }
+
+        // Load all items from the table using a Promise
+        var allItemsPromise = new Promise(function(resolve, reject) {
+          var oBinding = oTable.getBinding("rows");
+          oBinding.getModel().read(oBinding.getPath(), {
+            success: function(oData) {
+              resolve(oData.results); // Populate aAllItems with loaded data
+            },
+            error: function() {
+              MessageBox.error("Error loading data :(");
+              reject();
+            },
+          });
+        });
+
+        // Validate TspId
+        var tspIdValidationPromise = new Promise(function(resolve, reject) {
+          oModel.read("/TspValidationSet", {
+            method: "GET",
+            success: function(oData) {
+              var TspIdNotPrint = false;
+
+              aSelectedIndices.forEach(function(index) {
+                var oObject = aAllItems[index];
+                // Check if the TspId of the selected object is present in validation data
+                for (var i = 0; i < oData.results.length; i++) {
+                  if (oData.results[i].TspId === oObject.TspId) {
+                    TspIdNotPrint = true;
+                    break;
+                  }
+                }
+              });
+              resolve(TspIdNotPrint);
+            },
+            error: function(oError) {
+              MessageBox.error("Error on Validation oData");
+              resolve(true);
+            },
+          });
+        });
+
+        // After loading data and validating TspId
+        allItemsPromise
+          .then(function(allItems) {
+            aAllItems = allItems; // Set aAllItems with loaded data
+
+            return tspIdValidationPromise;
+          })
+          .then(function(TspIdNotPrint) {
+            // Check if TspId is not allowed to print
+            if (TspIdNotPrint) {
+              MessageBox.error(
+                "There is a carrier that cannot be printed, please check the selected lines"
+              );
+              return;
+            }
+
+            // Check if Lifecycle is '06-Canceled'
+            var lifecycle06Exists = aSelectedIndices.some(function(index) {
+              var oObject = aAllItems[index];
+              return oObject.Lifecycle === "06-Canceled";
+            });
+
+            if (lifecycle06Exists) {
+              MessageBox.error(
+                "It is not possible to print canceled documents, please check the selected documents"
+              );
+              return;
+            }
+
+            // Check if PrintStatus is 'Printed'
+            var printStatusBExists = aSelectedIndices.some(function(index) {
+              var oObject = aAllItems[index];
+              return oObject.PrintStatus === "Printed";
+            });
+
+            // Confirm reprint if PrintStatus is 'Printed'
+            if (printStatusBExists) {
+              MessageBox.confirm(
+                "Some FSD documents have already been printed, do you want to continue?",
+                {
+                  title: "Confirmation: Reprint?",
+                  onClose: function(oAction) {
+                    if (oAction === MessageBox.Action.OK) {
+                      that._printSelectedItems(aAllItems, aSelectedIndices);
+                    }
+                  },
+                }
+              );
+            } else {
+              that._printSelectedItems(aAllItems, aSelectedIndices);
+            }
+
+            // Call this.onRefresh() after a short delay to ensure table is updated
+            setTimeout(function() {
+              that.onRefresh();
+            }, 4000);
+          })
+          .catch(function(error) {
+            MessageBox.error(error);
+          });
+      },
       _printSelectedItems: function(gettingAllRows, aSelectedIndices) {
         var that = this;
         var oModel = this.getView().getModel();
@@ -208,61 +324,36 @@ sap.ui.define(
         var that = this,
           oModel = this.getView().getModel(),
           oTable = this.byId("table001").getTable(),
-          aSelectedIndices = oTable.getSelectedIndices(),
-          aAllItems;
+          aSelectedIndices = oTable.getSelectedIndices();
 
-        // Check if there are any selected indices
+        // Checking related indexes
         if (aSelectedIndices.length === 0) {
           MessageBox.error("Select at least one line");
           return;
         }
 
-        var tspIdValidationPromise = new Promise(function(resolve, reject) {
-          oModel.read("/TspValidationSet", {
-            method: "GET",
-            success: function(oData) {
-              var TspIdNotArchived = false;
-              aAllItems = oTable
-                .getBinding("rows")
-                .getContexts()
-                .map(function(context) {
-                  return context.getObject();
-                });
+        // Charged data on Promise
+        var loadAllItems = new Promise(function(resolve, reject) {
+          var oBinding = oTable.getBinding("rows");
 
-              aSelectedIndices.forEach(function(index) {
-                var oObject = aAllItems[index];
-                // Check if the TspId of the selected object is present in the service data
-                for (var i = 0; i < oData.results.length; i++) {
-                  if (oData.results[i].TspId === oObject.TspId) {
-                    // If there is a match, set TspIdNotArchived to true and break the loop
-                    TspIdNotArchived = true;
-                    break;
-                  }
-                }
-              });
-              resolve(TspIdNotArchived); // Resolve the promise once TspId validation is done
+          oBinding.getModel().read(oBinding.getPath(), {
+            success: function(oData) {
+              resolve(oData.results);
             },
-            error: function(oError) {
-              MessageBox.error("Error on Validation oData");
-              resolve(true); // Resolve the promise with error flag
+            error: function() {
+              MessageBox.error("Error loading data :(");
+              reject();
             },
           });
         });
 
-        tspIdValidationPromise
-          .then(function(TspIdNotArchived) {
-            // TspId not allowed to Archive?
-            if (TspIdNotArchived) {
-              MessageBox.error(
-                "There is a carrier that cannot be archived, please check the selected lines"
-              );
-              return;
-            }
-
+        // Let's process Archive!
+        loadAllItems
+          .then(function(aAllItems) {
             // Lifecycle = '06-Canceled'?
             var lifecycle06Exists = aSelectedIndices.some(function(index) {
               var oObject = aAllItems[index];
-              return oObject.Lifecycle === "06-Canceled";
+              return oObject && oObject.Lifecycle === "06-Canceled";
             });
 
             if (lifecycle06Exists) {
@@ -275,10 +366,10 @@ sap.ui.define(
             // WebarchStatus = 'Archived'?
             var WebarchStatusBExists = aSelectedIndices.some(function(index) {
               var oObject = aAllItems[index];
-              return oObject.WebarchStatus === "Archived";
+              return oObject && oObject.WebarchStatus === "Archived";
             });
 
-            // WebarchStatus = 'Archived'? Show Cancellation Message
+            // Sorry already archived!
             if (WebarchStatusBExists) {
               MessageBox.error(
                 "Some FSD documents have been already archived, archiving cancelled."
@@ -287,13 +378,14 @@ sap.ui.define(
               that._archiveSelectedItems(aAllItems, aSelectedIndices);
             }
 
-            // Call this.onRefresh() after a short delay to ensure table is updated
+            // Update table with a short delay
             setTimeout(function() {
               that.onRefresh();
             }, 4000);
           })
-          .catch(function(error) {
-            MessageBox.error(error); // Show error message if TspId validation fails
+          .catch(function() {
+            // Error loading data :(
+            console.log("Error loading data :(");
           });
       },
       _archiveSelectedItems: async function(gettingAllRows, aSelectedIndices) {
