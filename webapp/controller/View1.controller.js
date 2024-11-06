@@ -99,38 +99,39 @@ sap.ui.define(
           });
         });
 
-        // Validate TspId
-        var tspIdValidationPromise = new Promise(function(resolve, reject) {
-          oModel.read("/TspValidationSet", {
-            method: "GET",
-            success: function(oData) {
-              var TspIdNotPrint = false;
-
-              aSelectedIndices.forEach(function(index) {
-                var oObject = aAllItems[index];
-                // Check if the TspId of the selected object is present in validation data
-                for (var i = 0; i < oData.results.length; i++) {
-                  if (oData.results[i].TspId === oObject.TspId) {
-                    TspIdNotPrint = true;
-                    break;
-                  }
-                }
-              });
-              resolve(TspIdNotPrint);
-            },
-            error: function(oError) {
-              MessageBox.error("Error on Validation oData");
-              resolve(true);
-            },
-          });
-        });
-
-        // After loading data and validating TspId
+        // After loading data, validate TspId
         allItemsPromise
           .then(function(allItems) {
             aAllItems = allItems; // Set aAllItems with loaded data
 
-            return tspIdValidationPromise;
+            // Validate TspId now that aAllItems is populated
+            return new Promise(function(resolve, reject) {
+              oModel.read("/TspValidationSet", {
+                method: "GET",
+                success: function(oData) {
+                  var TspIdNotPrint = false;
+
+                  // Check if there are results in oData to iterate over
+                  if (oData.results && oData.results.length > 0) {
+                    aSelectedIndices.forEach(function(index) {
+                      var oObject = aAllItems[index];
+                      // Check if the TspId of the selected object is present in validation data
+                      for (var i = 0; i < oData.results.length; i++) {
+                        if (oData.results[i].TspId === oObject.TspId) {
+                          TspIdNotPrint = true;
+                          break;
+                        }
+                      }
+                    });
+                  }
+                  resolve(TspIdNotPrint);
+                },
+                error: function(oError) {
+                  MessageBox.error("Error on Validation oData");
+                  resolve(true); // Resolve with true to prevent printing if validation fails
+                },
+              });
+            });
           })
           .then(function(TspIdNotPrint) {
             // Check if TspId is not allowed to print
