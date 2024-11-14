@@ -523,10 +523,11 @@ sap.ui.define(
       onSave: async function(oEvent) {
         var oSmartTable = this.byId("table001");
         var oTable = oSmartTable.getTable();
-        var oBinding = oTable.getRows();
+        var oBinding = oTable.getBinding("rows"); // Get the binding of the table rows
         var hasError = false;
         var sBatchGroupId = "Save";
 
+        // Create a new ODataModel instance
         var oModel = new sap.ui.model.odata.v2.ODataModel(
           this.getOwnerComponent()._mManifestModels[""].sServiceUrl,
           true
@@ -535,28 +536,40 @@ sap.ui.define(
         oModel.setUseBatch(true);
         oModel.setDeferredGroups([sBatchGroupId]);
 
-        await Promise.all(
-          oBinding.map(async function(oContext) {
-            let sPath = oContext.getBindingContext().getPath();
-            let oItem = oContext.getBindingContext().getObject();
-            let fsdDate = oItem.FsdDate;
+        // Get the contexts of the table rows
+        const aContexts = oBinding.getContexts();
 
-            if (fsdDate) {
-              var dateRegex = /^(0[1-9]|[12][0-9]|3[01])\/(0[1-9]|1[0-2])\/\d{4}$/;
-              if (!dateRegex.test(fsdDate)) {
-                MessageBox.error(
-                  "The FSD Id " +
-                    oItem.SfirId +
-                    " has an invalid format. Please use DD/MM/YYYY on Settlement Date."
-                );
-                hasError = true;
-              } else {
-                oModel.update(sPath, oItem, { groupId: sBatchGroupId });
+        // Iterate through each context asynchronously
+        await Promise.all(
+          aContexts.map(async function(oContext) {
+            if (oContext) {
+              // Check if the context exists
+              let sPath = oContext.getPath(); // Get the OData path of the current item
+              let oItem = oContext.getObject(); // Get the object data from the context
+              let fsdDate = oItem.FsdDate;
+
+              // Validate the 'FsdDate' field if it exists
+              if (fsdDate) {
+                var dateRegex = /^(0[1-9]|[12][0-9]|3[01])\/(0[1-9]|1[0-2])\/\d{4}$/;
+
+                // Check if the date format is valid (DD/MM/YYYY)
+                if (!dateRegex.test(fsdDate)) {
+                  MessageBox.error(
+                    "The FSD Id " +
+                      oItem.SfirId +
+                      " has an invalid format. Please use DD/MM/YYYY on Settlement Date."
+                  );
+                  hasError = true;
+                } else {
+                  // Update the item in the OData model with batch grouping
+                  oModel.update(sPath, oItem, { groupId: sBatchGroupId });
+                }
               }
             }
           })
         );
 
+        // Submit changes if no errors were found
         if (!hasError) {
           oModel.submitChanges({
             groupId: sBatchGroupId,
