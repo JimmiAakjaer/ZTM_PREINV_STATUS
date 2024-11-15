@@ -550,14 +550,14 @@ sap.ui.define(
 
               // Validate the 'FsdDate' field if it exists
               if (fsdDate) {
-                var dateRegex = /^(0[1-9]|[12][0-9]|3[01])\/(0[1-9]|1[0-2])\/\d{4}$/;
+                var dateRegex = /^(0[1-9]|[12][0-9]|3[01])\.(0[1-9]|1[0-2])\.\d{4}$/;
 
-                // Check if the date format is valid (DD/MM/YYYY)
+                // Check if the date format is valid (DD.MM.YYYY)
                 if (!dateRegex.test(fsdDate)) {
                   MessageBox.error(
                     "The FSD Id " +
                       oItem.SfirId +
-                      " has an invalid format. Please use DD/MM/YYYY on Settlement Date."
+                      " has an invalid format. Please use DD.MM.YYYY on Settlement Date."
                   );
                   hasError = true;
                 } else {
