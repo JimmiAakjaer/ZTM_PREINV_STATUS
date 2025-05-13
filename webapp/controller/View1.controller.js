@@ -1,22 +1,34 @@
 sap.ui.define(
   [
-    "sap/ui/core/mvc/Controller",
-    "sap/ui/core/Fragment",
-    "sap/m/MessageBox",
-    "sap/m/PDFViewer",
     "../libs/jszip",
     "../libs/xlsx",
+    "sap/m/MessageBox",
+    "sap/m/PDFViewer",
+    "sap/m/Token",
+    "sap/ui/core/mvc/Controller",
+    "sap/ui/core/Fragment",
+    "sap/ui/Device",
+    "sap/ui/comp/valuehelpdialog/ValueHelpDialog",
+    "sap/ui/model/Filter",
+    "sap/ui/model/FilterOperator",
+    "sap/ui/model/json/JSONModel",
     "sap/ui/export/library",
     "sap/ui/export/Spreadsheet",
     "sap/ui/model/type/Float",
   ],
-  function(
-    Controller,
-    Fragment,
-    MessageBox,
-    PDFViewer,
+  function (
     jszip,
     xlsxjs,
+    MessageBox,
+    PDFViewer,
+    Token,
+    Controller,
+    Fragment,
+    Device,
+    ValueHelpDialog,
+    Filter,
+    FilterOperator,
+    JSONModel,
     library,
     Spreadsheet,
     Float
@@ -27,178 +39,554 @@ sap.ui.define(
       excelSheetsData: [],
       pDialog: null,
 
-      onInit: function() {
-        this._oModel = this.getOwnerComponent().getModel();
-        this.getView().setModel(this._oModel);
-      },
-      openExcelUploadDialog: function(oEvent) {
-        this.excelSheetsData = [];
-        var oView = this.getView();
-        if (!this.pDialog) {
-          Fragment.load({
-            id: "excel_upload",
-            name: "ZTM_PREINV_STATUS.view.ExcelUpload",
-            type: "XML",
-            controller: this,
-          })
-            .then((oDialog) => {
-              var oFileUploader = Fragment.byId("excel_upload", "uploadSet");
-              oFileUploader.removeAllItems();
-              this.pDialog = oDialog;
-              this.pDialog.open();
-            })
-            .catch((error) => alert(error.message));
-        } else {
-          var oFileUploader = Fragment.byId("excel_upload", "uploadSet");
-          oFileUploader.removeAllItems();
-          this.pDialog.open();
-        }
-      },
-      handleTypeMissmatch: function(oEvent) {
-        var aFileTypes = oEvent.getSource().getFileType();
-        aFileTypes.map(function(sType) {
-          return "*." + sType;
-        });
-        MessageBox.error(
-          "The file type *." +
-            oEvent.getParameter("fileType") +
-            " is not supported. Choose one of the following types: " +
-            aFileTypes.join(", ")
-        );
-      },
-      onRefresh: function(oEvent) {
-        var oModel = this.getView().getModel();
-        var oSmartTable = this.getView().byId("table001");
-        oSmartTable.rebindTable();
-        oModel.refresh();
-      },
-      onPrint: function(oEvent) {
-        var that = this,
-          oModel = this.getView().getModel(),
-          oTable = this.byId("table001").getTable(),
-          aSelectedIndices = oTable.getSelectedIndices(),
-          aAllItems = [];
+      onInit: function () {
+        this._oTable = this.byId("table");
+        this._oFilterBar = this.byId("filterbar");
 
-        // Check if there are any selected indices
-        if (aSelectedIndices.length === 0) {
+        const oToday = new Date();
+        const oFirstDayOfMonth = new Date(
+          oToday.getFullYear(),
+          oToday.getMonth(),
+          1
+        );
+
+        // Format dates as "dd.MM.yyyy"
+        const fnFormatDate = function (oDate) {
+          const day = String(oDate.getDate()).padStart(2, "0");
+          const month = String(oDate.getMonth() + 1).padStart(2, "0");
+          const year = oDate.getFullYear();
+          return `${day}.${month}.${year}`;
+        };
+
+        const oViewModel = new JSONModel({
+          editMode: false,
+          filters: {
+            IvCreatedOnFrom: fnFormatDate(oFirstDayOfMonth),
+            IvCreatedOnTo: fnFormatDate(oToday),
+            ExportStatus: [],
+            PrintStatus: [],
+            SfirType: [],
+            SfirId: [],
+            Lifecycle: [],
+            TorId: [],
+            TspId: [],
+            Preinvoice: [],
+            CreatedBy: [],
+          },
+        });
+
+        this.getView().setModel(oViewModel, "view");
+
+        // Call initial search and store snapshot
+        this.onSearch(); // This will call _storeInitialData after loading
+      },
+      onSearch: function () {
+        const oView = this.getView();
+        const oFilterBar = oView.byId("filterbar");
+        const oTable = oView.byId("table");
+        const aFilters = [];
+
+        oFilterBar.getAllFilterItems().forEach((oFilterItem) => {
+          const sName = oFilterItem.getName();
+          const oControl = oFilterBar.determineControlByFilterItem(oFilterItem);
+
+          if (!oControl) {
+            return;
+          }
+
+          // Handle MultiInput with tokens
+          if (oControl instanceof sap.m.MultiInput) {
+            const aTokens = oControl.getTokens();
+            const aTokenFilters = [];
+
+            aTokens.forEach((oToken) => {
+              const oTokenData = oToken.data("range"); // token generated by ValueHelpDialog has this
+
+              if (oTokenData) {
+                // Token is a range condition from ValueHelpDialog
+                aTokenFilters.push(new sap.ui.model.Filter({
+                  path: sName,
+                  operator: oTokenData.exclude ? "NE" : oTokenData.operation,
+                  value1: oTokenData.value1,
+                  value2: oTokenData.value2
+                }));
+              } else {
+                // Fallback for plain tokens (manually added)
+                aTokenFilters.push(new sap.ui.model.Filter(sName, "EQ", oToken.getKey() || oToken.getText()));
+              }
+            });
+
+            if (aTokenFilters.length > 1) {
+              aFilters.push(new sap.ui.model.Filter(aTokenFilters, false)); // OR logic
+            } else if (aTokenFilters.length === 1) {
+              aFilters.push(aTokenFilters[0]);
+            }
+          }
+          // Handle date fields
+          else if (["IvCreatedOnFrom", "IvCreatedOnTo", "IvInvDt"].includes(sName)) {
+            const vRaw = oControl.getValue?.() || oControl.getDateValue?.();
+            const vFormatted = (() => {
+              if (vRaw instanceof Date) {
+                return vRaw.toISOString().split("T")[0];
+              }
+              if (typeof vRaw === "string") {
+                if (/^\d{2}[./]\d{2}[./]\d{4}$/.test(vRaw)) {
+                  const [d, m, y] = vRaw.split(/[./]/);
+                  return `${y}-${m}-${d}`;
+                }
+                if (/^\d{4}-\d{2}-\d{2}$/.test(vRaw)) {
+                  return vRaw;
+                }
+              }
+              return null;
+            })();
+            if (vFormatted) {
+              aFilters.push(new sap.ui.model.Filter(sName, "EQ", vFormatted));
+            }
+          }
+          // Handle plain fields
+          else {
+            const v = oControl.getValue?.();
+            if (v) {
+              aFilters.push(new sap.ui.model.Filter(sName, "EQ", v));
+            }
+          }
+        });
+
+        this.getOwnerComponent().getModel().read("/ItemSet", {
+          filters: aFilters,
+          success: (oData) => {
+            const oModel = new sap.ui.model.json.JSONModel({ results: oData.results });
+            oView.setModel(oModel, "table");
+
+            setTimeout(() => {
+              const oBinding = oTable.getBinding("items");
+              if (oBinding) {
+                oBinding.attachEventOnce("change", () => {
+                  this._storeInitialData();
+                });
+              }
+            }, 0);
+          },
+          error: () => {
+            sap.m.MessageToast.show("Error while fetching data.");
+          }
+        });
+      },
+      onSave: async function () {
+        const oTable = this.byId("table");
+        const aItems = oTable.getItems();
+        const oJSONModel = this.getView().getModel("table");
+        const oODataModel = this.getView().getModel(); // OData model usado no onSearch
+        const sBatchGroupId = "manual";
+
+        if (!(oODataModel instanceof sap.ui.model.odata.v2.ODataModel)) {
+          MessageBox.error("ODataModel is not available.");
+          return;
+        }
+
+        let hasChanges = false;
+        let hasError = false;
+        const aChangedEntries = [];
+
+        oODataModel.setUseBatch(true);
+        oODataModel.setDeferredGroups([sBatchGroupId]);
+
+        await Promise.all(
+          aItems.map(async (oItem) => {
+            const oContext = oItem.getBindingContext("table");
+            if (!oContext) return;
+
+            const sPath = oContext.getPath(); // e.g., "/0", "/1", etc.
+            const oCurrent = oJSONModel.getProperty(sPath);
+            const oInitial = this._mInitialData?.[sPath];
+
+            if (!oCurrent || !oInitial) return;
+
+            const formattedCurrentFsdDate = this.formatDateToDDMMYYYY(
+              oCurrent.FsdDate
+            );
+            const formattedInitialFsdDate = this.formatDateToDDMMYYYY(
+              oInitial.FsdDate
+            );
+
+            if (
+              oCurrent.SfirId !== oInitial.SfirId ||
+              oCurrent.SfirType !== oInitial.SfirType
+            ) {
+              return;
+            }
+
+            const bPreinvoiceChanged =
+              oCurrent.Preinvoice !== oInitial.Preinvoice;
+            const bFsdDateChanged =
+              formattedCurrentFsdDate !== formattedInitialFsdDate;
+
+            if (!bPreinvoiceChanged && !bFsdDateChanged) return;
+
+            hasChanges = true;
+
+            let fsdDate = oCurrent.FsdDate;
+            let formattedDate;
+
+            if (fsdDate instanceof Date) {
+              formattedDate = this.formatDateToDDMMYYYY(fsdDate);
+            } else if (typeof fsdDate === "string") {
+              if (fsdDate.includes("T")) {
+                // ISO format
+                try {
+                  const parsed = new Date(fsdDate);
+                  if (isNaN(parsed)) throw new Error("Invalid date");
+                  formattedDate = this.formatDateToDDMMYYYY(parsed);
+                } catch (e) {
+                  MessageBox.error(
+                    `The FSD Id ${oCurrent.SfirId} has an invalid date format. Please use DD.MM.YYYY.`
+                  );
+                  hasError = true;
+                  return;
+                }
+              } else {
+                const normalized = fsdDate.trim().replace(/\//g, ".");
+                const dateRegex = /^\d{2}\.\d{2}\.\d{4}$/;
+                if (!dateRegex.test(normalized)) {
+                  MessageBox.error(
+                    `The FSD Id ${oCurrent.SfirId} has an invalid date format. Please use DD.MM.YYYY.`
+                  );
+                  hasError = true;
+                  return;
+                }
+                formattedDate = normalized;
+              }
+            } else {
+              MessageBox.error(
+                `The FSD Id ${oCurrent.SfirId} has an unrecognized date format.`
+              );
+              hasError = true;
+              return;
+            }
+
+            const oUpdated = { ...oCurrent, FsdDate: formattedDate };
+
+            // Clean invalid fields (empty string, undefined, null)
+            Object.keys(oUpdated).forEach((key) => {
+              if (
+                oUpdated[key] === "" ||
+                oUpdated[key] === undefined ||
+                oUpdated[key] === null
+              ) {
+                delete oUpdated[key];
+              }
+            });
+
+            const sKey = oODataModel.createKey("ItemSet", {
+              SfirId: oCurrent.SfirId,
+              SfirType: oCurrent.SfirType,
+            });
+
+            oODataModel.update("/" + sKey, oUpdated, {
+              groupId: sBatchGroupId,
+            });
+
+            aChangedEntries.push({
+              path: sPath,
+              originalDate: oCurrent.FsdDate,
+            });
+          })
+        );
+
+        if (hasError) return;
+
+        if (!hasChanges) {
+          MessageBox.information("No data has been changed.");
+          return;
+        }
+
+        oODataModel.submitChanges({
+          groupId: sBatchGroupId,
+          success: () => {
+            // Restore UI state
+            aChangedEntries.forEach(({ path, originalDate }) => {
+              oJSONModel.setProperty(path + "/FsdDate", originalDate);
+            });
+
+            this._storeInitialData(); // Update initial snapshot
+            MessageBox.success("Changes successfully submitted.");
+          },
+          error: (oError) => {
+            MessageBox.error("Error submitting changes.");
+            console.error("OData submission error:", oError);
+          },
+        });
+      },
+      onRefresh: function () {
+        const oTable = this.byId("table");
+        const oBinding = oTable.getBinding("items");
+
+        if (!oBinding) return;
+
+        oBinding.attachEventOnce("dataReceived", () => {
+          this._storeInitialData(); // only after data is fully loaded
+        });
+
+        this.onSearch();
+      },
+      onEdit: function () {
+        const oViewModel = this.getView().getModel("view");
+        const bEditMode = oViewModel.getProperty("/editMode");
+
+        // Toggle edit mode
+        oViewModel.setProperty("/editMode", !bEditMode);
+
+        // Change icon of the edit button
+        const oButton = this.byId("editButton");
+        oButton.setIcon(bEditMode ? "sap-icon://edit" : "sap-icon://display");
+      },
+      onArchive: function () {
+        var that = this,
+          oTable = this.byId("table"),
+          aSelectedItems = oTable.getSelectedItems();
+
+        if (aSelectedItems.length === 0) {
           MessageBox.error("Select at least one line");
           return;
         }
 
-        // Load all items from the table using a Promise
-        var allItemsPromise = new Promise(function(resolve, reject) {
-          var oBinding = oTable.getBinding("rows");
-          oBinding.getModel().read(oBinding.getPath(), {
-            success: function(oData) {
-              resolve(oData.results); // Populate aAllItems with loaded data
-            },
-            error: function() {
-              MessageBox.error("Error loading data :(");
-              reject();
-            },
-          });
+        var aSelectedData = aSelectedItems
+          .map(function (oItem) {
+            // Verifique se o bindingContext existe
+            var oContext = oItem.getBindingContext("table");
+            return oContext ? oContext.getObject() : null;
+          })
+          .filter(Boolean);
+
+        if (aSelectedData.length === 0) {
+          MessageBox.error("Selected items do not contain any valid data.");
+          return;
+        }
+
+        var lifecycle06Exists = aSelectedData.some(function (oObject) {
+          return oObject.Lifecycle === "06-Canceled";
         });
 
-        // After loading data, validate TspId
-        allItemsPromise
-          .then(function(allItems) {
-            aAllItems = allItems; // Set aAllItems with loaded data
+        if (lifecycle06Exists) {
+          MessageBox.error(
+            "It is not possible to Archive canceled documents, please check the selected documents"
+          );
+          return;
+        }
 
-            // Validate TspId now that aAllItems is populated
-            return new Promise(function(resolve, reject) {
-              oModel.read("/TspValidationSet", {
-                method: "GET",
-                success: function(oData) {
-                  var TspIdNotPrint = false;
+        var WebarchStatusBExists = aSelectedData.some(function (oObject) {
+          return oObject.WebarchStatus === "Archived";
+        });
 
-                  // Check if there are results in oData to iterate over
-                  if (oData.results && oData.results.length > 0) {
-                    aSelectedIndices.forEach(function(index) {
-                      var oObject = aAllItems[index];
-                      // Check if the TspId of the selected object is present in validation data
-                      for (var i = 0; i < oData.results.length; i++) {
-                        if (oData.results[i].TspId === oObject.TspId) {
-                          TspIdNotPrint = true;
-                          break;
-                        }
-                      }
-                    });
-                  }
-                  resolve(TspIdNotPrint);
-                },
-                error: function(oError) {
-                  MessageBox.error("Error on Validation oData");
-                  resolve(true); // Resolve with true to prevent printing if validation fails
-                },
-              });
-            });
-          })
-          .then(function(TspIdNotPrint) {
-            // Check if TspId is not allowed to print
-            if (TspIdNotPrint) {
-              MessageBox.error(
-                "There is a carrier that cannot be printed, please check the selected lines"
-              );
-              return;
-            }
-
-            // Check if Lifecycle is '06-Canceled'
-            var lifecycle06Exists = aSelectedIndices.some(function(index) {
-              var oObject = aAllItems[index];
-              return oObject.Lifecycle === "06-Canceled";
-            });
-
-            if (lifecycle06Exists) {
-              MessageBox.error(
-                "It is not possible to print canceled documents, please check the selected documents"
-              );
-              return;
-            }
-
-            // Check if PrintStatus is 'Printed'
-            var printStatusBExists = aSelectedIndices.some(function(index) {
-              var oObject = aAllItems[index];
-              return oObject.PrintStatus === "Printed";
-            });
-
-            // Confirm reprint if PrintStatus is 'Printed'
-            if (printStatusBExists) {
-              MessageBox.confirm(
-                "Some FSD documents have already been printed, do you want to continue?",
-                {
-                  title: "Confirmation: Reprint?",
-                  onClose: function(oAction) {
-                    if (oAction === MessageBox.Action.OK) {
-                      that._printSelectedItems(aAllItems, aSelectedIndices);
-                    }
-                  },
-                }
-              );
-            } else {
-              that._printSelectedItems(aAllItems, aSelectedIndices);
-            }
-
-            // Call this.onRefresh() after a short delay to ensure table is updated
-            setTimeout(function() {
-              that.onRefresh();
-            }, 4000);
-          })
-          .catch(function(error) {
-            MessageBox.error(error);
-          });
+        if (WebarchStatusBExists) {
+          MessageBox.error(
+            "Some FSD documents have been already archived, archiving cancelled."
+          );
+        } else {
+          that._archiveSelectedItems(aSelectedData);
+        }
       },
-      _printSelectedItems: function(gettingAllRows, aSelectedIndices) {
+      _archiveSelectedItems: async function (aSelectedData) {
         var that = this;
-        var oModel = this.getView().getModel();
+
+        if (aSelectedData.length === 0) {
+          MessageBox.error("Select at least one line");
+          return;
+        }
+
+        var sEntitySet = "/ArchiveSet";
+        var sBatchGroupId = "Archive";
+        var oModel = this.getOwnerComponent().getModel();
+
+        // Enable batch processing
+        oModel.setUseBatch(true);
+        oModel.setDeferredGroups([sBatchGroupId]);
+
+        try {
+          // Prepare batch updates
+          aSelectedData.forEach(function (oItem) {
+            if (!oItem.SfirId) {
+              throw new Error("Missing SfirId for one of the selected items.");
+            }
+
+            var sPath = sEntitySet + "(SfirId='" + oItem.SfirId + "')";
+            var oPayload = { SfirId: oItem.SfirId };
+
+            oModel.update(sPath, oPayload, {
+              groupId: sBatchGroupId,
+              merge: true,
+            });
+          });
+
+          // Submit batch
+          oModel.submitChanges({
+            groupId: sBatchGroupId,
+            success: function (oData, oResponse) {
+              MessageBox.success("PDF was archived successfully");
+              that.onRefresh();
+            },
+            error: function (oError) {
+              MessageBox.error("Error archiving data: " + oError.message);
+            },
+          });
+        } catch (error) {
+          MessageBox.error(
+            "Exception during archive processing: " + error.message
+          );
+        }
+      },
+      _storeInitialData: function () {
+        const oTable = this.byId("table");
+        const oModel = this.getView().getModel("table");
+        const aItems = oTable.getItems();
+
+        this._mInitialData = {};
+
+        aItems.forEach((oItem) => {
+          const oContext = oItem.getBindingContext("table");
+          if (!oContext) return;
+
+          const sPath = oContext.getPath();
+          const oData = Object.assign({}, oModel.getProperty(sPath));
+
+          // Convert FsdDate to string for consistent comparison
+          oData.FsdDate = this.formatDateToDDMMYYYY(oData.FsdDate);
+
+          this._mInitialData[sPath] = oData;
+        });
+
+        console.log(
+          "Initial data stored in _mInitialData:",
+          this._mInitialData
+        );
+      },
+      formatCurrency: function (value) {
+        if (!value) {
+          return "0,00";
+        }
+
+        // Format number with 2 decimals and thousand separator (e.g., 1.234,56)
+        return new Intl.NumberFormat("de-DE", {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        }).format(value);
+      },
+      formatDateToDDMMYYYY: function (value) {
+        if (!value) return "";
+
+        const oDateFormat = sap.ui.core.format.DateFormat.getDateInstance({
+          pattern: "dd.MM.yyyy",
+        });
+
+        if (value instanceof Date) {
+          return oDateFormat.format(value);
+        }
+
+        if (typeof value === "string") {
+          const cleaned = value.trim().replace(/\//g, ".");
+          const parts = cleaned.split(".");
+
+          if (parts.length === 3) {
+            const [dd, mm, yyyy] = parts;
+            return `${dd.padStart(2, "0")}.${mm.padStart(2, "0")}.${yyyy}`;
+          }
+
+          return cleaned;
+        }
+
+        return "";
+      },
+      onPrint: function (oEvent) {
+        var that = this,
+          oTable = this.byId("table"), // Garantir que o ID da tabela é "table"
+          aSelectedItems = oTable.getSelectedItems();
+
+        // Check if there are any selected items
+        if (aSelectedItems.length === 0) {
+          MessageBox.error("Select at least one line");
+          return;
+        }
+
+        // Retrieve the data for the selected items
+        var aSelectedData = aSelectedItems
+          .map(function (oItem) {
+            var oContext = oItem.getBindingContext("table");
+            return oContext ? oContext.getObject() : null;
+          })
+          .filter(Boolean); // Filter out null or invalid items
+
+        if (aSelectedData.length === 0) {
+          MessageBox.error("Selected items do not contain any valid data.");
+          return;
+        }
+
+        // Validate TspId and check if the document can be printed
+        var TspIdNotPrint = aSelectedData.some(function (oObject) {
+          return oObject.TspId === null || oObject.TspId === undefined;
+        });
+
+        if (TspIdNotPrint) {
+          MessageBox.error(
+            "There is a carrier that cannot be printed, please check the selected lines"
+          );
+          return;
+        }
+
+        // Check if Lifecycle is '06-Canceled'
+        var lifecycle06Exists = aSelectedData.some(function (oObject) {
+          return oObject.Lifecycle === "06-Canceled";
+        });
+
+        if (lifecycle06Exists) {
+          MessageBox.error(
+            "It is not possible to print canceled documents, please check the selected documents"
+          );
+          return;
+        }
+
+        // Check if PrintStatus is 'Printed'
+        var printStatusBExists = aSelectedData.some(function (oObject) {
+          return oObject.PrintStatus === "Printed";
+        });
+
+        // Confirm reprint if PrintStatus is 'Printed'
+        if (printStatusBExists) {
+          MessageBox.confirm(
+            "Some FSD documents have already been printed, do you want to continue?",
+            {
+              title: "Confirmation: Reprint?",
+              onClose: function (oAction) {
+                if (oAction === MessageBox.Action.OK) {
+                  that._printSelectedItems(aSelectedData);
+                }
+              },
+            }
+          );
+        } else {
+          that._printSelectedItems(aSelectedData);
+        }
+
+        // Refresh the table after a short delay
+        setTimeout(function () {
+          that.onRefresh();
+        }, 4000);
+      },
+      _printSelectedItems: function (aSelectedData) {
+        var that = this;
+        var oModel = this.getOwnerComponent().getModel();
+
+        if (aSelectedData.length === 0) {
+          MessageBox.error("Select at least one line");
+          return;
+        }
+
         var aSelectedItems = [];
 
-        aSelectedIndices.forEach(function(index) {
-          if (index >= 0 && index < gettingAllRows.length) {
-            var row = gettingAllRows[index];
-            var sfirId = row.SfirId;
-            if (sfirId) {
-              aSelectedItems.push(sfirId);
-            }
+        // Collect the SfirIds of the selected items
+        aSelectedData.forEach(function (oItem) {
+          if (oItem.SfirId) {
+            aSelectedItems.push(oItem.SfirId);
           }
         });
 
@@ -206,6 +594,8 @@ sap.ui.define(
           var concatenatedSfirIds = aSelectedItems.join(",");
           var opdfViewer = new PDFViewer();
           that.getView().addDependent(opdfViewer);
+
+          // Build the source URL for the PDF
           var sServiceURL = oModel.sServiceUrl;
           var sSource =
             sServiceURL +
@@ -216,120 +606,10 @@ sap.ui.define(
           opdfViewer.setTitle("PreInvoice PDF");
           opdfViewer.open();
         } else {
-          MessageBox.error("Select at least one line");
+          MessageBox.error("Select at least one valid line to print");
         }
       },
-      onArchive: function(oEvent) {
-        var that = this,
-          oModel = this.getView().getModel(),
-          oTable = this.byId("table001").getTable(),
-          aSelectedIndices = oTable.getSelectedIndices();
-
-        // Checking related indexes
-        if (aSelectedIndices.length === 0) {
-          MessageBox.error("Select at least one line");
-          return;
-        }
-
-        // Charged data on Promise
-        var loadAllItems = new Promise(function(resolve, reject) {
-          var oBinding = oTable.getBinding("rows");
-
-          oBinding.getModel().read(oBinding.getPath(), {
-            success: function(oData) {
-              resolve(oData.results);
-            },
-            error: function() {
-              MessageBox.error("Error loading data :(");
-              reject();
-            },
-          });
-        });
-
-        // Let's process Archive!
-        loadAllItems
-          .then(function(aAllItems) {
-            // Lifecycle = '06-Canceled'?
-            var lifecycle06Exists = aSelectedIndices.some(function(index) {
-              var oObject = aAllItems[index];
-              return oObject && oObject.Lifecycle === "06-Canceled";
-            });
-
-            if (lifecycle06Exists) {
-              MessageBox.error(
-                "It is not possible to Archive canceled documents, please check the selected documents"
-              );
-              return;
-            }
-
-            // WebarchStatus = 'Archived'?
-            var WebarchStatusBExists = aSelectedIndices.some(function(index) {
-              var oObject = aAllItems[index];
-              return oObject && oObject.WebarchStatus === "Archived";
-            });
-
-            // Sorry already archived!
-            if (WebarchStatusBExists) {
-              MessageBox.error(
-                "Some FSD documents have been already archived, archiving cancelled."
-              );
-            } else {
-              that._archiveSelectedItems(aAllItems, aSelectedIndices);
-            }
-
-            // Update table with a short delay
-            setTimeout(function() {
-              that.onRefresh();
-            }, 4000);
-          })
-          .catch(function() {
-            // Error loading data :(
-            console.log("Error loading data :(");
-          });
-      },
-      _archiveSelectedItems: async function(gettingAllRows, aSelectedIndices) {
-        var aSelectedItems = aSelectedIndices
-          .filter((index) => index >= 0 && index < gettingAllRows.length)
-          .map((index) => gettingAllRows[index]?.SfirId)
-          .filter((sfirId) => sfirId);
-
-        if (aSelectedItems.length > 0) {
-          var sEntitySet = "/ArchiveSet";
-          var sBatchGroupId = "Archive";
-
-          var oModel = this.getOwnerComponent().getModel();
-          oModel.setDefaultBindingMode(sap.ui.model.BindingMode.TwoWay);
-          oModel.setUseBatch(true);
-          oModel.setDeferredGroups([sBatchGroupId]);
-
-          await Promise.all(
-            aSelectedItems.map(async function(sfirId) {
-              var sPath = sEntitySet + "(SfirId='" + sfirId + "')";
-              var oItem = { SfirId: sfirId };
-              try {
-                oModel.update(sPath, oItem, { groupId: sBatchGroupId });
-              } catch (error) {
-                MessageBox.error(
-                  "Error updating item with ID " + sfirId + ": " + error
-                );
-              }
-            })
-          );
-
-          oModel.submitChanges({
-            groupId: sBatchGroupId,
-            success: function(oData, oResponse) {
-              MessageBox.success("PDF was archived successfully");
-            },
-            error: function(oError) {
-              MessageBox.error("Error Archiving data");
-            },
-          });
-        } else {
-          MessageBox.error("Select at least one line");
-        }
-      },
-      onTempDownload: function() {
+      onTempDownload: function () {
         var header = [
           { label: "FSD Type", property: "SfirType" },
           { label: "FSD Id", property: "SfirId" },
@@ -353,50 +633,58 @@ sap.ui.define(
         var oSettings = {
           workbook: { columns: header },
           dataSource: aData,
-          fileName: "TM: Selfbilling Pre-invoice.xlsx",
+          fileName: "ECC Self-Billing documentation.xlsx",
           worker: false,
         };
         var oSheet = new sap.ui.export.Spreadsheet(oSettings);
         oSheet
           .build()
-          .then(function() {
+          .then(function () {
             MessageBox.success("Template Downloaded");
           })
-          .finally(function() {
+          .finally(function () {
             oSheet.destroy();
           });
       },
-      onCloseDialog: function(oEvent) {
+      onCloseDialog: function (oEvent) {
         this.pDialog.close();
       },
-      onItemRemoved: function(oEvent) {
+      openExcelUploadDialog: function (oEvent) {
         this.excelSheetsData = [];
+        var oView = this.getView();
+        if (!this.pDialog) {
+          Fragment.load({
+            id: "excel_upload",
+            name: "ZTM_PREINV_STATUS.view.ExcelUpload",
+            type: "XML",
+            controller: this,
+          })
+            .then((oDialog) => {
+              var oFileUploader = Fragment.byId("excel_upload", "uploadSet");
+              oFileUploader.removeAllItems();
+              this.pDialog = oDialog;
+              this.pDialog.open();
+            })
+            .catch((error) => alert(error.message));
+        } else {
+          var oFileUploader = Fragment.byId("excel_upload", "uploadSet");
+          oFileUploader.removeAllItems();
+          this.pDialog.open();
+        }
       },
-      onBeforeExport: function(oEvent) {
-        var oSmartTable = this.byId("table001");
-        var oTable = oSmartTable.getTable();
-        var oBinding = oTable.getBinding("rows");
-
-        var concatenatedValues = "";
-        oBinding.getContexts().forEach(function(oContext) {
-          var oItem = oContext.getObject();
-          concatenatedValues += oItem.SfirId + "|" + oItem.SfirType + ",";
+      handleTypeMissmatch: function (oEvent) {
+        var aFileTypes = oEvent.getSource().getFileType();
+        aFileTypes.map(function (sType) {
+          return "*." + sType;
         });
-
-        // Removing last comma
-        concatenatedValues = concatenatedValues.slice(0, -1);
-
-        var oModel = this.getView().getModel();
-        var sServiceURL = oModel.sServiceUrl;
-        var sSource =
-          sServiceURL +
-          "/ExcelStatusSet(Keys='" +
-          concatenatedValues +
-          "')/$value";
-
-        oEvent.getParameter("exportSettings").url = sSource;
+        MessageBox.error(
+          "The file type *." +
+          oEvent.getParameter("fileType") +
+          " is not supported. Choose one of the following types: " +
+          aFileTypes.join(", ")
+        );
       },
-      onUploadSet: function(oEvent) {
+      onUploadSet: function (oEvent) {
         var that = this,
           oSource = oEvent.getSource();
 
@@ -409,7 +697,10 @@ sap.ui.define(
         that.callOdata();
         that.pDialog.close();
       },
-      onUploadSetComplete: function(oEvent) {
+      onItemRemoved: function (oEvent) {
+        this.excelSheetsData = [];
+      },
+      onUploadSetComplete: function (oEvent) {
         var oFileUploader = Fragment.byId("excel_upload", "uploadSet");
         var oFile = oFileUploader.getItems()[0].getFileObject();
         var reader = new FileReader();
@@ -423,7 +714,7 @@ sap.ui.define(
             workbook.Sheets["Sheet1"]
           );
 
-          workbook.SheetNames.forEach(function(sheetName) {
+          workbook.SheetNames.forEach(function (sheetName) {
             that.excelSheetsData.push(
               XLSX.utils.sheet_to_row_object_array(workbook.Sheets[sheetName])
             );
@@ -431,7 +722,7 @@ sap.ui.define(
         };
         reader.readAsBinaryString(oFile);
       },
-      callOdata: function() {
+      callOdata: function () {
         var oModel = this.getView().getModel();
         var payload = {};
 
@@ -478,186 +769,390 @@ sap.ui.define(
           });
         });
       },
-      onEdit: function() {
-        var oSmartTable = this.getView().byId("table001");
-        var oTable = oSmartTable.getTable();
-        var aColumns = oTable.getColumns();
-        var oViewModel = this.getView().getModel("view");
+      onExport: function () {
+        var that = this,
+          oTable = this.byId("table"),
+          aSelectedItems = oTable.getSelectedItems();
 
-        if (!oViewModel) {
-          oViewModel = new sap.ui.model.json.JSONModel();
-          this.getView().setModel(oViewModel, "view");
-          oViewModel.setProperty("/editMode", false);
+        // Show error if nothing is selected
+        if (aSelectedItems.length === 0) {
+          MessageBox.error("Select at least one line");
+          return;
         }
 
-        var bEditMode = oViewModel.getProperty("/editMode");
-        oViewModel.setProperty("/editMode", !bEditMode);
+        // Extract data from selected items
+        var aSelectedData = aSelectedItems
+          .map(function (oItem) {
+            var oContext = oItem.getBindingContext("table"); // Ensure model alias is correct
+            return oContext ? oContext.getObject() : null;
+          })
+          .filter(Boolean);
 
-        var oButton = this.getView().byId("editButton");
-        if (bEditMode) {
-          oButton.setIcon("sap-icon://edit");
-        } else {
-          oButton.setIcon("sap-icon://display");
+        // Show error if selected items don't contain valid data
+        if (aSelectedData.length === 0) {
+          MessageBox.error("Selected items do not contain any valid data.");
+          return;
         }
 
-        aColumns.forEach(function(oColumn) {
-          if (oColumn.getLabel().getText() === "Preinvoice Nr.") {
-            oColumn.setTemplate(
-              new sap.m.Input({
-                value: "{Preinvoice}",
-                editable: !oColumn.getTemplate().getEditable(),
-              })
-            );
+        // Format helper to convert "DD/MM/YYYY" or ISO to "DD.MM.YYYY"
+        function formatDate(sDate) {
+          if (
+            typeof sDate === "string" &&
+            /^\d{2}\/\d{2}\/\d{4}$/.test(sDate)
+          ) {
+            return sDate.replace(/\//g, ".");
           }
-          if (oColumn.getLabel().getText() === "Settlement Date") {
-            oColumn.setTemplate(
-              new sap.m.Input({
-                value: "{FsdDate}",
-                editable: !oColumn.getTemplate().getEditable(),
-              })
-            );
+
+          try {
+            var oDate = new Date(sDate);
+            if (isNaN(oDate.getTime())) return "";
+            var day = String(oDate.getDate()).padStart(2, "0");
+            var month = String(oDate.getMonth() + 1).padStart(2, "0");
+            var year = oDate.getFullYear();
+            return day + "." + month + "." + year;
+          } catch (e) {
+            return "";
           }
+        }
+
+        // Format data to be exported
+        var aFormattedData = aSelectedData.map(function (oItem) {
+          return {
+            SfirType: oItem.SfirType,
+            SfirId: oItem.SfirId,
+            Preinvoice: oItem.Preinvoice,
+            FsdDate: oItem.FsdDate,
+            CreatedOn: formatDate(oItem.CreatedOn),
+            Lifecycle: oItem.Lifecycle,
+            TspId: oItem.TspId,
+            BpExt: oItem.BpExt,
+            ResId: oItem.ResId,
+            InvDt: formatDate(oItem.InvDt),
+            NetAmount: oItem.NetAmount,
+            DocCurrency: oItem.DocCurrency,
+            AdminFee: oItem.AdminFee,
+            PlanDisc: oItem.PlanDisc,
+            ExportStatus: oItem.ExportStatus,
+            PrintStatus: oItem.PrintStatus,
+            WebarchStatus: oItem.WebarchStatus,
+          };
         });
-        oTable.invalidate();
+
+        // Define columns to export
+        var aColumns = [
+          { label: "FSD Type", property: "SfirType" },
+          { label: "FSD Id", property: "SfirId" },
+          { label: "Preinvoice Nr.", property: "Preinvoice" },
+          { label: "Settlement Date", property: "FsdDate" },
+          { label: "Created On", property: "CreatedOn" }, // formatted as text
+          { label: "Lifecycle", property: "Lifecycle" },
+          { label: "Carrier", property: "TspId" },
+          { label: "External Carrier", property: "BpExt" },
+          { label: "Invoice Date", property: "InvDt" }, // formatted as text
+          {
+            label: "Net Amount",
+            property: "NetAmount",
+            type: "number",
+            scale: 2,
+          },
+          { label: "Currency", property: "DocCurrency" },
+          {
+            label: "Admin Fee",
+            property: "AdminFee",
+            type: "number",
+            scale: 2,
+          },
+          {
+            label: "Plan Discount",
+            property: "PlanDisc",
+            type: "number",
+            scale: 2,
+          },
+          { label: "Export Status", property: "ExportStatus" },
+          { label: "Print Status", property: "PrintStatus" },
+          { label: "Webarch Status", property: "WebarchStatus" },
+        ];
+
+        // Configure export settings
+        var oSpreadsheet = new sap.ui.export.Spreadsheet({
+          workbook: {
+            columns: aColumns,
+            context: {
+              sheetName: "FSD Data",
+            },
+          },
+          dataSource: aFormattedData,
+          fileName: "PreInvoice_Export.xlsx",
+        });
+
+        // Build and download the Excel file
+        oSpreadsheet.build().finally(function () {
+          oSpreadsheet.destroy();
+        });
       },
-      /*
-      onSave: async function(oEvent) {
-        var oSmartTable = this.byId("table001");
-        var oTable = oSmartTable.getTable();
-        var oBinding = oTable.getBinding("rows"); // Get the binding of the table rows
-        var hasError = false;
-        var sBatchGroupId = "Save";
+      /* MultiInput Validations */
+      onMultiInputChange: function (oEvent) {
+        const oInput = oEvent.getSource();
+        const sFieldId = oInput.getId().split("--").pop(); // Get field ID like "IvExportStatus"
+        const sValue = oEvent.getParameter("value").trim();
+        const oViewModel = this.getView().getModel("view");
 
-        // Create a new ODataModel instance
-        var oModel = new sap.ui.model.odata.v2.ODataModel(
-          this.getOwnerComponent()._mManifestModels[""].sServiceUrl,
-          true
-        );
-        oModel.setDefaultBindingMode(sap.ui.model.BindingMode.TwoWay);
-        oModel.setUseBatch(true);
-        oModel.setDeferredGroups([sBatchGroupId]);
-
-        // Get the contexts of the table rows
-        const aContexts = oBinding.getContexts();
-
-        // Iterate through each context asynchronously
-        await Promise.all(
-          aContexts.map(async function(oContext) {
-            if (oContext) {
-              // Check if the context exists
-              let sPath = oContext.getPath(); // Get the OData path of the current item
-              let oItem = oContext.getObject(); // Get the object data from the context
-              let fsdDate = oItem.FsdDate;
-
-              // Validate the 'FsdDate' field if it exists
-              if (fsdDate) {
-                var dateRegex = /^(0[1-9]|[12][0-9]|3[01])\.(0[1-9]|1[0-2])\.\d{4}$/;
-
-                // Check if the date format is valid (DD.MM.YYYY)
-                if (!dateRegex.test(fsdDate)) {
-                  MessageBox.error(
-                    "The FSD Id " +
-                      oItem.SfirId +
-                      " has an invalid format. Please use DD.MM.YYYY on Settlement Date."
-                  );
-                  hasError = true;
-                } else {
-                  // Update the item in the OData model with batch grouping
-                  oModel.update(sPath, oItem, { groupId: sBatchGroupId });
-                }
-              }
-            }
-          })
-        );
-
-        // Submit changes if no errors were found
-        if (!hasError) {
-          oModel.submitChanges({
-            groupId: sBatchGroupId,
-            success: function(oData, oResponse) {
-              MessageBox.success("Changes successfully submitted");
-            },
-            error: function(oError) {
-              MessageBox.error("Error submitting changes");
-            },
-          });
+        if (!sValue) {
+          oInput.setValue("");
+          return;
         }
+
+        const sFilterProp = sFieldId === "IvPrintStatus" ? "PrintStatus" : "ExportStatus";
+        const aCurrentTokens = oViewModel.getProperty(`/filters/${sFilterProp}`) || [];
+
+        const bExists = aCurrentTokens.some(
+          (item) => item.key === sValue || item.text === sValue
+        );
+        if (bExists) {
+          oInput.setValue("");
+          return;
+        }
+
+        const oToken = new sap.m.Token({ key: sValue, text: sValue });
+        oInput.addToken(oToken);
+
+        aCurrentTokens.push({ key: sValue, text: sValue });
+        oViewModel.setProperty(`/filters/${sFilterProp}`, aCurrentTokens);
+
+        oInput.setValue("");
       },
-      */
-      onSave: async function(oEvent) {
-        var oSmartTable = this.byId("table001");
-        var oTable = oSmartTable.getTable();
-        var oBinding = oTable.getBinding("rows"); // Get the binding of the table rows
-        var hasError = false;
-        var sBatchGroupId = "Save";
-        var errorMessages = []; // Array to accumulate error messages
+      onTokenUpdate: function (oEvent) {
+        if (oEvent.getParameter("type") !== "removed") return;
 
-        // Create a new ODataModel instance
-        var oModel = new sap.ui.model.odata.v2.ODataModel(
-          this.getOwnerComponent()._mManifestModels[""].sServiceUrl,
-          true
-        );
-        oModel.setDefaultBindingMode(sap.ui.model.BindingMode.TwoWay);
-        oModel.setUseBatch(true);
-        oModel.setDeferredGroups([sBatchGroupId]);
+        const oInput = oEvent.getSource();
+        const sFieldId = oInput.getId().split("--").pop();
+        const sFilterProp = sFieldId === "IvPrintStatus" ? "PrintStatus" : "ExportStatus";
 
-        // Get the contexts of the table rows
-        const aContexts = oBinding.getContexts();
+        const aRemovedTokens = oEvent.getParameter("removedTokens");
+        const oViewModel = this.getView().getModel("view");
+        let aCurrentTokens = oViewModel.getProperty(`/filters/${sFilterProp}`) || [];
 
-        // Iterate through each context asynchronously
-        await Promise.all(
-          aContexts.map(async function(oContext) {
-            if (oContext) {
-              // Check if the context exists
-              let sPath = oContext.getPath(); // Get the OData path of the current item
-              let oItem = oContext.getObject(); // Get the object data from the context
-              let fsdDate = oItem.FsdDate;
+        aRemovedTokens.forEach((token) => {
+          aCurrentTokens = aCurrentTokens.filter(
+            (item) => item.key !== token.getKey()
+          );
+        });
 
-              // Validate the 'FsdDate' field if it exists
-              if (fsdDate) {
-                var dateRegex = /^(0[1-9]|[12][0-9]|3[01])\.(0[1-9]|1[0-2])\.\d{4}$/;
+        oViewModel.setProperty(`/filters/${sFilterProp}`, aCurrentTokens);
+      },
+      onSuggestStatus: function (oEvent) {
+        const sTerm = oEvent.getParameter("suggestValue");
+        const oInput = oEvent.getSource();
 
-                // Check if the date format is valid (DD.MM.YYYY)
-                if (!dateRegex.test(fsdDate)) {
-                  errorMessages.push(
-                    "The FSD Id " +
-                      oItem.SfirId +
-                      " has an invalid format. Please use DD.MM.YYYY on Settlement Date."
-                  );
-                  hasError = true;
-                } else {
-                  // Update the item in the OData model with batch grouping
-                  oModel.update(sPath, oItem, { groupId: sBatchGroupId });
-                }
-              }
-            }
+        const oFilter = new sap.ui.model.Filter({
+          filters: [
+            new sap.ui.model.Filter("Code", sap.ui.model.FilterOperator.Contains, sTerm),
+            new sap.ui.model.Filter("Text", sap.ui.model.FilterOperator.Contains, sTerm),
+          ],
+          and: false,
+        });
+
+        oInput.getBinding("suggestionItems").filter(oFilter);
+      },
+      /* Generic ValueHelp W/ Odata */
+      handleF4StatusDialog: function (sFieldId, sModelPath) {
+        const oMultiInput = this.byId(sFieldId);
+        const sQuery = oMultiInput.getValue();
+        const oModel = this.getView().getModel();
+        const oViewModel = this.getView().getModel("view");
+
+        const sFilterProp = sFieldId === "IvPrintStatus" ? "PrintStatus" : "ExportStatus";
+        const sDialogProp = `_oValueHelpDialog${sFilterProp}`;
+
+        const aFilters = sQuery ? [
+          new sap.ui.model.Filter({
+            filters: [
+              new sap.ui.model.Filter("Code", sap.ui.model.FilterOperator.Contains, sQuery),
+              new sap.ui.model.Filter("Text", sap.ui.model.FilterOperator.Contains, sQuery),
+            ],
+            and: false,
           })
-        );
+        ] : [];
 
-        // If there were errors, display the appropriate message
-        if (hasError) {
-          if (errorMessages.length > 1) {
-            // Show a single message for multiple errors
-            MessageBox.error(
-              "There are multiple rows with invalid date format. Please review the following: \n" +
-                errorMessages.join("\n")
-            );
-          } else {
-            // Show the single error message
-            MessageBox.error(errorMessages[0]);
-          }
+        const aExistingData = oViewModel.getProperty(`/filters/${sFilterProp}`) || [];
+        const aExistingTokens = aExistingData.map((item) => new sap.m.Token({ key: item.key, text: item.text }));
+
+        if (!aExistingTokens.length) {
+          oMultiInput.removeAllTokens();
+          oViewModel.setProperty(`/filters/${sFilterProp}`, []);
+        }
+
+        if (!this[sDialogProp]) {
+          this[sDialogProp] = new sap.ui.comp.valuehelpdialog.ValueHelpDialog("", {
+            title: sFilterProp === "PrintStatus" ? "Printed?" : "Excel Exported?",
+            supportMultiselect: true,
+            supportRanges: true,
+            key: "Code",
+            descriptionKey: "Text",
+            stretch: sap.ui.Device.system.phone,
+
+            ok: function (oEvent) {
+              const aSelectedTokens = oEvent.getParameter("tokens");
+              const oUniqueMap = {};
+              const aUniqueTokens = [];
+
+              aSelectedTokens.forEach((token) => {
+                if (!oUniqueMap[token.getKey()]) {
+                  oUniqueMap[token.getKey()] = true;
+                  aUniqueTokens.push(token);
+                }
+              });
+
+              oMultiInput.setTokens(aUniqueTokens);
+
+              const aSelected = aUniqueTokens.map((token) => ({
+                key: token.getKey(),
+                text: token.getText(),
+              }));
+              oViewModel.setProperty(`/filters/${sFilterProp}`, aSelected);
+
+              this.close();
+            },
+            cancel: function () {
+              this.close();
+            }
+          });
+
+          const oColModel = new sap.ui.model.json.JSONModel({
+            cols: [
+              { label: "Code", template: "Code" },
+              { label: "Description", template: "Text" },
+            ],
+          });
+
+          const oTable = this[sDialogProp].getTable();
+          oTable.setModel(oColModel, "columns");
+          oTable.setModel(oModel);
+          oTable.bindRows({ path: sModelPath, filters: aFilters });
+
+          this[sDialogProp].setRangeKeyFields([
+            { label: "Code", key: "Code" },
+            { label: "Description", key: "Text" },
+          ]);
         } else {
-          // Submit changes if no errors were found
-          oModel.submitChanges({
-            groupId: sBatchGroupId,
-            success: function(oData, oResponse) {
-              MessageBox.success("Changes successfully submitted");
-            },
-            error: function(oError) {
-              MessageBox.error("Error submitting changes");
-            },
-          });
+          const oTable = this[sDialogProp].getTable();
+          oTable.getBinding("rows").filter(aFilters);
         }
+
+        this[sDialogProp].setTokens(aExistingTokens);
+
+        const oTable = this[sDialogProp].getTable();
+        oTable.attachEventOnce("rowsUpdated", () => {
+          oTable.clearSelection();
+          const aContexts = oTable.getBinding("rows").getContexts();
+          const aSelectedKeys = aExistingTokens.map((t) => t.getKey());
+          const oSeenKeys = {};
+
+          aContexts.forEach((oContext, iIndex) => {
+            const sCode = oContext.getProperty("Code");
+            if (sCode && !oSeenKeys[sCode] && aSelectedKeys.includes(sCode)) {
+              oSeenKeys[sCode] = true;
+              oTable.addSelectionInterval(iIndex, iIndex);
+            }
+          });
+        });
+
+        this[sDialogProp].open();
+      },
+      /* ValueHelp W/ Odata Export Status */
+      handleF4ExportStatus: function () {
+        this.handleF4StatusDialog("IvExportStatus", "/SHExportStatusSet");
+      },
+      /* ValueHelp W/ Odata Print Status */
+      handleF4PrintStatus: function () {
+        this.handleF4StatusDialog("IvPrintStatus", "/SHPrintStatusSet");
+      },
+      /* Generic ValueHelp Dialog */
+      openValueHelpDialog: function (sFieldId, sTitle, sPath, sKey, sText) {
+        const oView = this.getView();
+        const oModel = oView.getModel();
+        const oViewModel = oView.getModel("view");
+        const oMultiInput = this.byId(sFieldId);
+        const aTokens = oMultiInput.getTokens();
+
+        if (!this._mValueHelpDialogs) {
+          this._mValueHelpDialogs = {};
+        }
+
+        if (!this._mValueHelpDialogs[sFieldId]) {
+          this.loadFragment({
+            name: "ZTM_PREINV_STATUS.view.ValueHelpDialog"
+          }).then(function (oDialog) {
+            oDialog.setTitle(sTitle);
+            oDialog.setSupportMultiselect(true);
+            oDialog.setSupportRanges(true);
+            oDialog.setSupportRangesOnly(true);
+            oDialog.setRangeKeyFields([
+              {
+                label: sText,
+                key: sKey,
+                type: "text"
+              }
+            ]);
+
+            oDialog.setTokens(aTokens);
+
+            // Passar o ID como payload no bind para resgatar no handler
+            oDialog.attachOk((oEvent) => this.onValueHelpDialogOkPress(sFieldId, oEvent));
+            oDialog.attachCancel(() => this.onValueHelpDialogCancelPress(sFieldId));
+            oDialog.attachAfterClose(() => this.onValueHelpDialogAfterClose(sFieldId));
+
+            this._mValueHelpDialogs[sFieldId] = oDialog;
+            oView.addDependent(oDialog);
+            oDialog.open();
+          }.bind(this));
+        } else {
+          this._mValueHelpDialogs[sFieldId].setTokens(aTokens);
+          this._mValueHelpDialogs[sFieldId].open();
+        }
+      },
+      onValueHelpDialogOkPress: function (sFieldId, oEvent) {
+        const oMultiInput = this.byId(sFieldId);
+        const aSelectedTokens = oEvent.getParameter("tokens") || [];
+        oMultiInput.setTokens(aSelectedTokens);
+
+        const oViewModel = this.getView().getModel("view");
+        const aSelectedData = aSelectedTokens.map(token => ({
+          key: token.getKey(),
+          text: token.getText()
+        }));
+        oViewModel.setProperty(`/filters/${sFieldId.replace("Iv", "")}`, aSelectedData);
+
+        this._mValueHelpDialogs[sFieldId].close();
+      },
+      onValueHelpDialogCancelPress: function (sFieldId) {
+        this._mValueHelpDialogs[sFieldId].close();
+      },
+      onValueHelpDialogAfterClose: function (sFieldId) {
+        this._mValueHelpDialogs[sFieldId].destroy();
+        delete this._mValueHelpDialogs[sFieldId];
+      },
+      /* ValueHelp Exclusive */
+      handleF4SfirType: function () {
+        this.openValueHelpDialog("IvSfirType", "FSD Type", "/SHFsdTypeSet", "Code", "Description");
+      },
+      handleF4SfirId: function () {
+        this.openValueHelpDialog("IvSfirId", "FSD ID", "/SHFsdIdSet", "Code", "Description");
+      },
+      handleF4Lifecycle: function () {
+        this.openValueHelpDialog("IvLifecycle", "Lifecycle", "/SHLifecycleSet", "Code", "Description");
+      },
+      handleF4TorId: function () {
+        this.openValueHelpDialog("IvTorId", "Freight Order", "/SHTorIdSet", "Code", "Description");
+      },
+      handleF4TspId: function () {
+        this.openValueHelpDialog("IvTspId", "Carrier", "/SHTspIdSet", "Code", "Description");
+      },
+      handleF4PreInvoice: function () {
+        this.openValueHelpDialog("IvPreinvoice", "Preinvoice Nr.", "/SHPreInvoiceSet", "Code", "Description");
+      },
+      handleF4CreatedBy: function () {
+        this.openValueHelpDialog("IvCreatedBy", "Created By", "/SHCreatedBySet", "Code", "Description");
       },
     });
   }

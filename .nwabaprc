@@ -4,9 +4,9 @@
     "conn_server": "https://dlgapps4dev1.dlggroup.org:44300/",
     "conn_client": "100", 
     "conn_user": "feliprio",        
-    "conn_password": "Dlggroup@012024",   
+    "conn_password": "Dlggroup@202401",   
     "abap_package": "Z001",       
     "abap_bsp": "ZTM_PREINV_STAT",  
-    "abap_bsp_text": "TM: Selfbilling Pre-invoice",
-    "abap_transport": "C4DK912281"
+    "abap_bsp_text": "ECC Self-Billing documentation",
+    "abap_transport": "C4DK912512"
 } 
