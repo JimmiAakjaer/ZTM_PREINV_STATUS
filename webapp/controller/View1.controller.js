@@ -162,7 +162,7 @@ sap.ui.define(
             setTimeout(() => {
               const oBinding = oTable.getBinding("items");
               if (oBinding) {
-                oBinding.attachEventOnce("change", () => {
+                oBinding.attachEventOnce("EventHandlerChange", () => {
                   this._storeInitialData();
                 });
               }
@@ -619,14 +619,14 @@ sap.ui.define(
           { label: "Lifecycle", property: "Lifecycle" },
           { label: "Carrier", property: "TspId" },
           { label: "External Carrier", property: "BpExt" },
-          { label: "Posting Date", property: "InvDt" },
+          { label: "Invoice Date", property: "InvDt" },
           { label: "Net Amount", property: "NetAmount" },
           { label: "Currency", property: "DocCurrency" },
-          { label: "Admin. Fee", property: "AdminFee" },
-          { label: "Plan. Discount", property: "PlanDisc" },
-          { label: "Excel Exported?", property: "ExportStatus" },
-          { label: "Printed?", property: "PrintStatus" },
-          { label: "Web Archived?", property: "WebarchStatus" },
+          { label: "Admin Fee", property: "AdminFee" },
+          { label: "Plan Discount", property: "PlanDisc" },
+          { label: "Export Status", property: "ExportStatus" },
+          { label: "Print Status", property: "PrintStatus" },
+          { label: "Webarch Status", property: "WebarchStatus" },
         ];
 
         var aData = [{}]; // Empty data
@@ -739,14 +739,14 @@ sap.ui.define(
                 LIFECYCLE: value["Lifecycle"],
                 TSP_ID: value["Carrier"],
                 BPEXT: value["External Carrier"],
-                INV_DT: value["Posting Date"],
+                INV_DT: value["Invoice Date"],
                 NET_AMOUNT: value["Net Amount"],
                 DOC_CURRENCY: value["Currency"],
-                ADMIN_FEE: value["Admin. Fee"],
-                PLAN_DISC: value["Plan. Discount"],
-                EXPORT_STATUS: value["Excel Exported?"],
-                PRINT_STATUS: value["Printed?"],
-                WEBARCH_STATUS: value["Web Archived?"],
+                ADMIN_FEE: value["Admin Fee"],
+                PLAN_DISC: value["Plan Discount"],
+                EXPORT_STATUS: value["Export Status"],
+                PRINT_STATUS: value["Print Status"],
+                WEBARCH_STATUS: value["Webarch Status"],
               },
             ],
           };
