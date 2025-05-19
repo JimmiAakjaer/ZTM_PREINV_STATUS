@@ -52,6 +52,7 @@
                                             showValueHelp="true"
                                             change="onMultiInputChange"
                                             valueHelpRequest="handleF4SfirType"
+                                            tokenUpdate="onTokenUpdate"
                                         />
                                     </fb:control>
                                 </fb:FilterGroupItem>
@@ -68,6 +69,7 @@
                                             showValueHelp="true"
                                             change="onMultiInputChange"
                                             valueHelpRequest="handleF4SfirId"
+                                            tokenUpdate="onTokenUpdate"
                                         />
                                     </fb:control>
                                 </fb:FilterGroupItem>
@@ -116,6 +118,7 @@
                                             showValueHelp="true"
                                             change="onMultiInputChange"
                                             valueHelpRequest="handleF4Lifecycle"
+                                            tokenUpdate="onTokenUpdate"
                                         />
                                     </fb:control>
                                 </fb:FilterGroupItem>
@@ -132,6 +135,7 @@
                                             showValueHelp="true"
                                             change="onMultiInputChange"
                                             valueHelpRequest="handleF4TorId"
+                                            tokenUpdate="onTokenUpdate"
                                         />
                                     </fb:control>
                                 </fb:FilterGroupItem>
@@ -148,6 +152,7 @@
                                             showValueHelp="true"
                                             change="onMultiInputChange"
                                             valueHelpRequest="handleF4TspId"
+                                            tokenUpdate="onTokenUpdate"
                                         />
                                     </fb:control>
                                 </fb:FilterGroupItem>
@@ -164,6 +169,7 @@
                                             showValueHelp="true"
                                             change="onMultiInputChange"
                                             valueHelpRequest="handleF4PreInvoice"
+                                            tokenUpdate="onTokenUpdate"
                                         />
                                     </fb:control>
                                 </fb:FilterGroupItem>
@@ -195,6 +201,7 @@
                                             showValueHelp="true"
                                             change="onMultiInputChange"
                                             valueHelpRequest="handleF4CreatedBy"
+                                            tokenUpdate="onTokenUpdate"
                                         />
                                     </fb:control>
                                 </fb:FilterGroupItem>

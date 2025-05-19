@@ -724,11 +724,11 @@ sap.ui.define(
       },
       callOdata: function () {
         var oModel = this.getView().getModel();
-        var payload = {};
+        var aPromises = [];
+        var that = this;
 
         this.excelSheetsData[0].forEach((value, index) => {
-          // setting the payload data
-          payload = {
+          var payload = {
             PREINVOICE: [
               {
                 SFIR_TYPE: value["FSD Type"],
@@ -749,25 +749,41 @@ sap.ui.define(
                 WEBARCH_STATUS: value["Webarch Status"],
               },
             ],
+            ExcelRowNumber: index + 1
           };
-          // setting excel file row number for identifying the exact row in case of error or success
-          payload.ExcelRowNumber = index + 1;
-          // calling the odata service
-          oModel.create("/UploadSet", payload, {
-            success: (result) => {
-              var oMessageManager = sap.ui.getCore().getMessageManager();
-              var oMessage = new sap.ui.core.message.Message({
-                message: "Building Created/Updated with ID: " + result.SfirId,
-                persistent: true, // create message as transition message
-                type: sap.ui.core.MessageType.Success,
-              });
-              oMessageManager.addMessages(oMessage);
-            },
-            error: (result) => {
-              MessageBox.error("Error processing data");
-            },
+
+          var p = new Promise((resolve, reject) => {
+            oModel.create("/UploadSet", payload, {
+              success: function (result) {
+                var oMessageManager = sap.ui.getCore().getMessageManager();
+                var oMessage = new sap.ui.core.message.Message({
+                  message: "Building Created/Updated with ID: " + result.SfirId,
+                  persistent: true,
+                  type: sap.ui.core.MessageType.Success,
+                });
+                oMessageManager.addMessages(oMessage);
+                resolve();
+              },
+              error: function (error) {
+                MessageBox.error("Error processing data");
+                reject();
+              }
+            });
           });
+
+          aPromises.push(p);
         });
+
+        // After all create calls are done
+        Promise.all(aPromises)
+          .then(() => {
+            MessageBox.success("Record(s) updated successfully!");
+            that.onRefresh(); // Refresh your table here
+          })
+          .catch(() => {
+            // Optionally handle partial errors here
+            MessageBox.warning("Some rows could not be processed.");
+          });
       },
       onExport: function () {
         var that = this,
@@ -794,15 +810,11 @@ sap.ui.define(
           return;
         }
 
-        // Format helper to convert "DD/MM/YYYY" or ISO to "DD.MM.YYYY"
+        // Helper to format "DD/MM/YYYY" or ISO to "DD.MM.YYYY"
         function formatDate(sDate) {
-          if (
-            typeof sDate === "string" &&
-            /^\d{2}\/\d{2}\/\d{4}$/.test(sDate)
-          ) {
+          if (typeof sDate === "string" && /^\d{2}\/\d{2}\/\d{4}$/.test(sDate)) {
             return sDate.replace(/\//g, ".");
           }
-
           try {
             var oDate = new Date(sDate);
             if (isNaN(oDate.getTime())) return "";
@@ -815,7 +827,7 @@ sap.ui.define(
           }
         }
 
-        // Format data to be exported
+        // Format data to be exported to Excel
         var aFormattedData = aSelectedData.map(function (oItem) {
           return {
             SfirType: oItem.SfirType,
@@ -838,62 +850,87 @@ sap.ui.define(
           };
         });
 
-        // Define columns to export
+        // Define columns for the Excel export
         var aColumns = [
           { label: "FSD Type", property: "SfirType" },
           { label: "FSD Id", property: "SfirId" },
           { label: "Preinvoice Nr.", property: "Preinvoice" },
           { label: "Settlement Date", property: "FsdDate" },
-          { label: "Created On", property: "CreatedOn" }, // formatted as text
+          { label: "Created On", property: "CreatedOn" },
           { label: "Lifecycle", property: "Lifecycle" },
           { label: "Carrier", property: "TspId" },
           { label: "External Carrier", property: "BpExt" },
-          { label: "Invoice Date", property: "InvDt" }, // formatted as text
-          {
-            label: "Net Amount",
-            property: "NetAmount",
-            type: "number",
-            scale: 2,
-          },
+          { label: "Invoice Date", property: "InvDt" },
+          { label: "Net Amount", property: "NetAmount", type: "number", scale: 2 },
           { label: "Currency", property: "DocCurrency" },
-          {
-            label: "Admin Fee",
-            property: "AdminFee",
-            type: "number",
-            scale: 2,
-          },
-          {
-            label: "Plan Discount",
-            property: "PlanDisc",
-            type: "number",
-            scale: 2,
-          },
+          { label: "Admin Fee", property: "AdminFee", type: "number", scale: 2 },
+          { label: "Plan Discount", property: "PlanDisc", type: "number", scale: 2 },
           { label: "Export Status", property: "ExportStatus" },
           { label: "Print Status", property: "PrintStatus" },
-          { label: "Webarch Status", property: "WebarchStatus" },
+          { label: "Webarch Status", property: "WebarchStatus" }
         ];
 
-        // Configure export settings
+        // Start Excel file creation
         var oSpreadsheet = new sap.ui.export.Spreadsheet({
           workbook: {
             columns: aColumns,
             context: {
-              sheetName: "FSD Data",
-            },
+              sheetName: "FSD Data"
+            }
           },
           dataSource: aFormattedData,
-          fileName: "PreInvoice_Export.xlsx",
+          fileName: "PreInvoice_Export.xlsx"
         });
 
-        // Build and download the Excel file
         oSpreadsheet.build().finally(function () {
           oSpreadsheet.destroy();
+
+          const oModel = that.getView().getModel(); // Default OData model
+          let iSuccessCount = 0;
+          let iErrorCount = 0;
+          const iTotal = aSelectedData.length;
+
+          aSelectedData.forEach(function (oItem) {
+            const sPath = "/ExcelStatusSet(SfirId='" + encodeURIComponent(oItem.SfirId) +
+              "',SfirType='" + encodeURIComponent(oItem.SfirType) + "')";
+
+            oModel.update(sPath, {
+              SfirId: oItem.SfirId,
+              SfirType: oItem.SfirType
+            }, {
+              success: function () {
+                iSuccessCount++;
+                checkCompletion();
+              },
+              error: function (oError) {
+                iErrorCount++;
+                const sMsg = oError?.responseText || oError?.message || "Unknown error";
+                console.log("Update failed:", sMsg);
+                checkCompletion();
+              }
+            });
+          });
+
+          // Called after every success or error to check if we’re done
+          function checkCompletion() {
+            if (iSuccessCount + iErrorCount === iTotal) {
+              if (iSuccessCount > 0) {
+                MessageBox.success(iSuccessCount + " record(s) exported");
+              }
+              if (iErrorCount > 0) {
+                MessageBox.error(iErrorCount + " record(s) failed to update. Check console for details.");
+              }
+
+              // Refresh only after all updates finish
+              that.onRefresh();
+            }
+          }
         });
       },
       /* MultiInput Validations */
       onMultiInputChange: function (oEvent) {
         const oInput = oEvent.getSource();
-        const sFieldId = oInput.getId().split("--").pop(); // Get field ID like "IvExportStatus"
+        const sFieldId = oInput.getId().split("--").pop(); // Ex: IvSfirType
         const sValue = oEvent.getParameter("value").trim();
         const oViewModel = this.getView().getModel("view");
 
@@ -902,7 +939,7 @@ sap.ui.define(
           return;
         }
 
-        const sFilterProp = sFieldId === "IvPrintStatus" ? "PrintStatus" : "ExportStatus";
+        const sFilterProp = sFieldId.replace("Iv", ""); // Transforma IvSfirType => SfirType
         const aCurrentTokens = oViewModel.getProperty(`/filters/${sFilterProp}`) || [];
 
         const bExists = aCurrentTokens.some(
@@ -925,8 +962,8 @@ sap.ui.define(
         if (oEvent.getParameter("type") !== "removed") return;
 
         const oInput = oEvent.getSource();
-        const sFieldId = oInput.getId().split("--").pop();
-        const sFilterProp = sFieldId === "IvPrintStatus" ? "PrintStatus" : "ExportStatus";
+        const sFieldId = oInput.getId().split("--").pop(); // Ex: IvSfirType
+        const sFilterProp = sFieldId.replace("Iv", "");    // => SfirType
 
         const aRemovedTokens = oEvent.getParameter("removedTokens");
         const oViewModel = this.getView().getModel("view");
