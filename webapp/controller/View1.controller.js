@@ -39,6 +39,10 @@ sap.ui.define(
       excelSheetsData: [],
       pDialog: null,
 
+      /**
+      * Initialization function.
+      * Sets up the initial table, filter bar, view model, and triggers initial search.
+      */
       onInit: function () {
         this._oTable = this.byId("table");
         this._oFilterBar = this.byId("filterbar");
@@ -80,6 +84,10 @@ sap.ui.define(
         // Call initial search and store snapshot
         this.onSearch(); // This will call _storeInitialData after loading
       },
+      /**
+      * Executes the search based on current filter bar input.
+      * Builds filters manually and reads data from the OData service into the table model.
+      */
       onSearch: function () {
         const oView = this.getView();
         const oFilterBar = oView.byId("filterbar");
@@ -173,6 +181,10 @@ sap.ui.define(
           }
         });
       },
+      /**
+      * Handles save action for table items.
+      * Compares modified fields (Preinvoice and FsdDate) against initial snapshot and submits batch updates to OData.
+      */
       onSave: async function () {
         const oTable = this.byId("table");
         const aItems = oTable.getItems();
@@ -318,6 +330,9 @@ sap.ui.define(
           },
         });
       },
+      /**
+      * Refreshes the table data and updates the initial snapshot (_mInitialData).
+      */
       onRefresh: function () {
         const oTable = this.byId("table");
         const oBinding = oTable.getBinding("items");
@@ -330,6 +345,10 @@ sap.ui.define(
 
         this.onSearch();
       },
+      /**
+      * Toggles the edit mode for the table.
+      * Also updates the icon of the edit button.
+      */
       onEdit: function () {
         const oViewModel = this.getView().getModel("view");
         const bEditMode = oViewModel.getProperty("/editMode");
@@ -341,6 +360,10 @@ sap.ui.define(
         const oButton = this.byId("editButton");
         oButton.setIcon(bEditMode ? "sap-icon://edit" : "sap-icon://display");
       },
+      /**
+      * Handles archive process for selected items.
+      * Validates lifecycle and archive status before triggering backend archive logic.
+      */
       onArchive: function () {
         var that = this,
           oTable = this.byId("table"),
@@ -387,6 +410,11 @@ sap.ui.define(
           that._archiveSelectedItems(aSelectedData);
         }
       },
+      /**
+      * Internal method to execute the archive operation in batch mode for selected items.
+      * Uses OData batch processing to submit archive requests.
+      * @param {Array} aSelectedData - Array of selected items data.
+      */
       _archiveSelectedItems: async function (aSelectedData) {
         var that = this;
 
@@ -436,6 +464,10 @@ sap.ui.define(
           );
         }
       },
+      /**
+      * Stores the current table data snapshot in _mInitialData.
+      * Used to detect changes during save.
+      */
       _storeInitialData: function () {
         const oTable = this.byId("table");
         const oModel = this.getView().getModel("table");
@@ -461,6 +493,11 @@ sap.ui.define(
           this._mInitialData
         );
       },
+      /**
+      * Formats a currency value into a string with two decimals and thousand separators.
+      * @param {Number} value - Currency value.
+      * @returns {String} Formatted currency.
+      */
       formatCurrency: function (value) {
         if (!value) {
           return "0,00";
@@ -472,6 +509,12 @@ sap.ui.define(
           maximumFractionDigits: 2,
         }).format(value);
       },
+      /**
+      * Formats a date into "DD.MM.YYYY" string.
+      * Accepts Date objects or string representations.
+      * @param {Date | String} value - Date to format.
+      * @returns {String} Formatted date.
+      */
       formatDateToDDMMYYYY: function (value) {
         if (!value) return "";
 
@@ -497,6 +540,10 @@ sap.ui.define(
 
         return "";
       },
+      /**
+      * Handles print action for selected table items.
+      * Validates lifecycle, print status, and TspId before triggering PDF generation.
+      */
       onPrint: function (oEvent) {
         var that = this,
           oTable = this.byId("table"), // Garantir que o ID da tabela é "table"
@@ -572,6 +619,10 @@ sap.ui.define(
           that.onRefresh();
         }, 4000);
       },
+      /**
+      * Internal function that triggers PDF generation and opens it in PDFViewer.
+      * @param {Array} aSelectedData - Array of selected items to print.
+      */
       _printSelectedItems: function (aSelectedData) {
         var that = this;
         var oModel = this.getOwnerComponent().getModel();
@@ -609,6 +660,9 @@ sap.ui.define(
           MessageBox.error("Select at least one valid line to print");
         }
       },
+      /**
+      * Downloads an empty Excel template file for documentation purposes.
+      */
       onTempDownload: function () {
         var header = [
           { label: "FSD Type", property: "SfirType" },
@@ -646,9 +700,15 @@ sap.ui.define(
             oSheet.destroy();
           });
       },
+      /**
+      * Closes the Excel upload dialog.
+      */
       onCloseDialog: function (oEvent) {
         this.pDialog.close();
       },
+      /**
+      * Opens the Excel upload dialog fragment for uploading Excel files.
+      */
       openExcelUploadDialog: function (oEvent) {
         this.excelSheetsData = [];
         var oView = this.getView();
@@ -672,6 +732,10 @@ sap.ui.define(
           this.pDialog.open();
         }
       },
+      /**
+      * Handles file type mismatch during file upload.
+      * Shows an error message if an invalid file type is uploaded.
+      */
       handleTypeMissmatch: function (oEvent) {
         var aFileTypes = oEvent.getSource().getFileType();
         aFileTypes.map(function (sType) {
@@ -684,6 +748,9 @@ sap.ui.define(
           aFileTypes.join(", ")
         );
       },
+      /**
+      * Validates if Excel file has been uploaded and triggers backend OData processing.
+      */
       onUploadSet: function (oEvent) {
         var that = this,
           oSource = oEvent.getSource();
@@ -697,9 +764,16 @@ sap.ui.define(
         that.callOdata();
         that.pDialog.close();
       },
+      /**
+      * Clears Excel data when an uploaded item is removed from the upload set.
+      */
       onItemRemoved: function (oEvent) {
         this.excelSheetsData = [];
       },
+      /**
+      * Parses the uploaded Excel file and converts its content into JSON format.
+      * Stores parsed data into this.excelSheetsData.
+      */
       onUploadSetComplete: function (oEvent) {
         var oFileUploader = Fragment.byId("excel_upload", "uploadSet");
         var oFile = oFileUploader.getItems()[0].getFileObject();
@@ -722,6 +796,10 @@ sap.ui.define(
         };
         reader.readAsBinaryString(oFile);
       },
+      /**
+      * Calls OData service to process uploaded Excel data row by row.
+      * Creates or updates records based on Excel input.
+      */
       callOdata: function () {
         var oModel = this.getView().getModel();
         var aPromises = [];
@@ -785,6 +863,10 @@ sap.ui.define(
             MessageBox.warning("Some rows could not be processed.");
           });
       },
+      /**
+      * Handles Excel export for selected table items.
+      * Formats data and triggers spreadsheet export including updating backend export status.
+      */
       onExport: function () {
         var that = this,
           oTable = this.byId("table"),
@@ -927,7 +1009,10 @@ sap.ui.define(
           }
         });
       },
-      /* MultiInput Validations */
+      /**
+      * Handles manual entry of tokens in MultiInput fields.
+      * Adds the token both visually and to the view model filter property.
+      */
       onMultiInputChange: function (oEvent) {
         const oInput = oEvent.getSource();
         const sFieldId = oInput.getId().split("--").pop(); // Ex: IvSfirType
@@ -958,6 +1043,10 @@ sap.ui.define(
 
         oInput.setValue("");
       },
+      /**
+      * Handles token removal from MultiInput.
+      * Updates view model filter properties accordingly.
+      */
       onTokenUpdate: function (oEvent) {
         if (oEvent.getParameter("type") !== "removed") return;
 
@@ -977,6 +1066,10 @@ sap.ui.define(
 
         oViewModel.setProperty(`/filters/${sFilterProp}`, aCurrentTokens);
       },
+      /**
+      * Provides suggestion filtering for ExportStatus and PrintStatus inputs.
+      * Filters suggestion items based on input.
+      */
       onSuggestStatus: function (oEvent) {
         const sTerm = oEvent.getParameter("suggestValue");
         const oInput = oEvent.getSource();
@@ -991,7 +1084,12 @@ sap.ui.define(
 
         oInput.getBinding("suggestionItems").filter(oFilter);
       },
-      /* Generic ValueHelp W/ Odata */
+      /**
+      * Opens a generic Value Help Dialog for ExportStatus or PrintStatus.
+      * Loads available values from the backend using OData.
+      * @param {String} sFieldId - Field ID of the input.
+      * @param {String} sModelPath - OData path to load suggestions from.
+      */
       handleF4StatusDialog: function (sFieldId, sModelPath) {
         const oMultiInput = this.byId(sFieldId);
         const sQuery = oMultiInput.getValue();
@@ -1096,15 +1194,26 @@ sap.ui.define(
 
         this[sDialogProp].open();
       },
-      /* ValueHelp W/ Odata Export Status */
+      /**
+      * Opens the Value Help Dialog for Export Status selection.
+      */
       handleF4ExportStatus: function () {
         this.handleF4StatusDialog("IvExportStatus", "/SHExportStatusSet");
       },
-      /* ValueHelp W/ Odata Print Status */
+      /**
+      * Opens the Value Help Dialog for Print Status selection.
+      */
       handleF4PrintStatus: function () {
         this.handleF4StatusDialog("IvPrintStatus", "/SHPrintStatusSet");
       },
-      /* Generic ValueHelp Dialog */
+      /**
+      * Opens a generic Value Help Dialog with support for ranges and multiselect.
+      * @param {String} sFieldId - Field ID of the input.
+      * @param {String} sTitle - Dialog title.
+      * @param {String} sPath - OData path.
+      * @param {String} sKey - Key property name.
+      * @param {String} sText - Text property name.
+      */
       openValueHelpDialog: function (sFieldId, sTitle, sPath, sKey, sText) {
         const oView = this.getView();
         const oModel = oView.getModel();
@@ -1148,6 +1257,10 @@ sap.ui.define(
           this._mValueHelpDialogs[sFieldId].open();
         }
       },
+      /**
+      * Handles the OK event from Value Help Dialog.
+      * Updates tokens in the input and filter property in view model.
+      */
       onValueHelpDialogOkPress: function (sFieldId, oEvent) {
         const oMultiInput = this.byId(sFieldId);
         const aSelectedTokens = oEvent.getParameter("tokens") || [];
@@ -1162,32 +1275,60 @@ sap.ui.define(
 
         this._mValueHelpDialogs[sFieldId].close();
       },
+      /**
+      * Handles cancel event from Value Help Dialog.
+      * Closes the dialog without applying changes.
+      */
       onValueHelpDialogCancelPress: function (sFieldId) {
         this._mValueHelpDialogs[sFieldId].close();
       },
+      /**
+      * Handles the after close event for Value Help Dialog.
+      * Destroys the dialog instance to free memory.
+      */
       onValueHelpDialogAfterClose: function (sFieldId) {
         this._mValueHelpDialogs[sFieldId].destroy();
         delete this._mValueHelpDialogs[sFieldId];
       },
-      /* ValueHelp Exclusive */
+      /**
+      * Opens the Value Help Dialog for FSD Type selection.
+      */
       handleF4SfirType: function () {
         this.openValueHelpDialog("IvSfirType", "FSD Type", "/SHFsdTypeSet", "Code", "Description");
       },
+      /**
+      * Opens the Value Help Dialog for FSD Id selection.
+      */
       handleF4SfirId: function () {
         this.openValueHelpDialog("IvSfirId", "FSD ID", "/SHFsdIdSet", "Code", "Description");
       },
+      /**
+      * Opens the Value Help Dialog for Lifecycle selection.
+      */
       handleF4Lifecycle: function () {
         this.openValueHelpDialog("IvLifecycle", "Lifecycle", "/SHLifecycleSet", "Code", "Description");
       },
+      /**
+      * Opens the Value Help Dialog for Freight Order (TorId) selection.
+      */
       handleF4TorId: function () {
         this.openValueHelpDialog("IvTorId", "Freight Order", "/SHTorIdSet", "Code", "Description");
       },
+      /**
+      * Opens the Value Help Dialog for Carrier (TspId) selection.
+      */
       handleF4TspId: function () {
         this.openValueHelpDialog("IvTspId", "Carrier", "/SHTspIdSet", "Code", "Description");
       },
+      /**
+      * Opens the Value Help Dialog for Preinvoice number selection.
+      */
       handleF4PreInvoice: function () {
         this.openValueHelpDialog("IvPreinvoice", "Preinvoice Nr.", "/SHPreInvoiceSet", "Code", "Description");
       },
+      /**
+      * Opens the Value Help Dialog for CreatedBy selection.
+      */
       handleF4CreatedBy: function () {
         this.openValueHelpDialog("IvCreatedBy", "Created By", "/SHCreatedBySet", "Code", "Description");
       },
