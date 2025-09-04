@@ -376,7 +376,6 @@ sap.ui.define(
 
         var aSelectedData = aSelectedItems
           .map(function (oItem) {
-            // Verifique se o bindingContext existe
             var oContext = oItem.getBindingContext("table");
             return oContext ? oContext.getObject() : null;
           })
@@ -392,30 +391,38 @@ sap.ui.define(
         });
 
         if (lifecycle06Exists) {
-          MessageBox.error(
-            "It is not possible to Archive canceled documents, please check the selected documents"
-          );
+          MessageBox.error("It is not possible to archive canceled documents. Please check the selected lines.");
           return;
         }
 
-        var WebarchStatusBExists = aSelectedData.some(function (oObject) {
+        var alreadyArchived = aSelectedData.some(function (oObject) {
           return oObject.WebarchStatus === "Archived";
         });
 
-        if (WebarchStatusBExists) {
-          MessageBox.error(
-            "Some FSD documents have been already archived, archiving cancelled."
-          );
+        if (alreadyArchived) {
+          MessageBox.confirm("Some FSD documents have already been archived. Do you want to continue?", {
+            title: "Confirmation: Re-archive?",
+            onClose: function (oAction) {
+              if (oAction === MessageBox.Action.OK) {
+                that._archiveSelectedItems(aSelectedData);
+              }
+            }
+          });
         } else {
           that._archiveSelectedItems(aSelectedData);
         }
+
+        // Refresh the table after short delay (optional, like in onPrint)
+        setTimeout(function () {
+          that.onRefresh();
+        }, 4000);
       },
       /**
-      * Internal method to execute the archive operation in batch mode for selected items.
-      * Uses OData batch processing to submit archive requests.
-      * @param {Array} aSelectedData - Array of selected items data.
-      */
-      _archiveSelectedItems: async function (aSelectedData) {
+       * Internal method to execute the archive operation in a single OData PUT request
+       * by sending concatenated SfirIds as key.
+       * @param {Array} aSelectedData - Array of selected items data.
+       */
+      _archiveSelectedItems: function (aSelectedData) {
         var that = this;
 
         if (aSelectedData.length === 0) {
@@ -423,46 +430,42 @@ sap.ui.define(
           return;
         }
 
-        var sEntitySet = "/ArchiveSet";
-        var sBatchGroupId = "Archive";
         var oModel = this.getOwnerComponent().getModel();
 
-        // Enable batch processing
-        oModel.setUseBatch(true);
-        oModel.setDeferredGroups([sBatchGroupId]);
+        // Extrai os SfirIds válidos
+        var aSfirIds = aSelectedData
+          .map(function (oItem) {
+            return oItem.SfirId;
+          })
+          .filter(Boolean);
 
-        try {
-          // Prepare batch updates
-          aSelectedData.forEach(function (oItem) {
-            if (!oItem.SfirId) {
-              throw new Error("Missing SfirId for one of the selected items.");
-            }
-
-            var sPath = sEntitySet + "(SfirId='" + oItem.SfirId + "')";
-            var oPayload = { SfirId: oItem.SfirId };
-
-            oModel.update(sPath, oPayload, {
-              groupId: sBatchGroupId,
-              merge: true,
-            });
-          });
-
-          // Submit batch
-          oModel.submitChanges({
-            groupId: sBatchGroupId,
-            success: function (oData, oResponse) {
-              MessageBox.success("PDF was archived successfully");
-              that.onRefresh();
-            },
-            error: function (oError) {
-              MessageBox.error("Error archiving data: " + oError.message);
-            },
-          });
-        } catch (error) {
-          MessageBox.error(
-            "Exception during archive processing: " + error.message
-          );
+        if (aSfirIds.length === 0) {
+          MessageBox.error("No valid SfirIds found for archive.");
+          return;
         }
+
+        // Concatena os IDs separados por vírgula
+        var sConcatenatedSfirIds = aSfirIds.join(",");
+
+        // Monta o path OData com os IDs concatenados
+        var sPath = "/ArchiveSet(SfirId='" + encodeURIComponent(sConcatenatedSfirIds) + "')";
+
+        // Payload contendo os mesmos IDs (ajuste conforme a definição no backend)
+        var oPayload = {
+          SfirId: sConcatenatedSfirIds
+        };
+
+        // Executa o único PUT
+        oModel.update(sPath, oPayload, {
+          success: function () {
+            MessageBox.success("Documents were archived successfully.");
+            that.onRefresh();
+          },
+          error: function (oError) {
+            var sMsg = oError && oError.message ? oError.message : "Unknown error";
+            MessageBox.error("Error archiving data: " + sMsg);
+          }
+        });
       },
       /**
       * Stores the current table data snapshot in _mInitialData.
